@@ -48,6 +48,21 @@ text:i've just been biking.	labels:oh nice, i haven't got on a bike in years!   
         }
     """
 ```
+```
+--jsonfile-datapath /tmp/data.json
+```
+```
+# Hardcoded metadata
+{
+    "version": "0.1",
+    "self_chat": false,
+    "speakers": null,
+    "opt": {},
+    "date": "2021-07-11 18:10:43.039242"
+}
+```
+
+
 
 ### with train val test split
 ```
@@ -64,7 +79,7 @@ mydata_train.txt, mydata_valid.txt mydata_test.txt (In same folder)
 parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task convai2 --batchsize 32 --num-epochs 2 --truncate 128
 
 # Or mix the task option to train from file
-parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task fromfile:parlaiformat --fromfile_datapath ~/ParlAI/tmp/data.txt --batchsize 32 --num-epochs 2 --truncate 128
+parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task jsonfile --jsonfile-datapath tmp/bd_episode.txt --batchsize 32 --num-epochs 2 --truncate 128
 
 ```
 
