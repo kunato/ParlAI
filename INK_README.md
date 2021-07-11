@@ -20,6 +20,35 @@ text:hello how are you today?	labels:i'm great thanks! what are you doing?
 text:i've just been biking.	labels:oh nice, i haven't got on a bike in years!   episode_done:True
 ```
 
+#### OR JSON 
+```
+
+    Conversations should be saved in JSONL format, where each line is
+    a JSON of the following form:
+    WARNING: The data below must be on ONE LINE per dialogue
+    in a conversation file or it will not load!!
+    .. code-block:
+        {
+            'possible_conversation_level_info': True,
+            'dialog':
+                [   [
+                        {
+                            'id': 'speaker_1',
+                            'text': <first utterance>,
+                        },
+                        {
+                            'id': 'speaker_2',
+                            'text': <second utterance>,
+                        },
+                        ...
+                    ],
+                    ...
+                ]
+            ...
+        }
+    """
+```
+
 ### with train val test split
 ```
 # --fromfile-datatype-extension true
