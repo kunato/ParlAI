@@ -77,10 +77,10 @@ mydata_train.txt, mydata_valid.txt mydata_test.txt (In same folder)
 # https://parl.ai/docs/tutorial_torch_generator_agent.html
 1. Define model (see tmp/example_model.py)
 parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task convai2 --batchsize 32 --num-epochs 2 --truncate 128
-
-# Or mix the task option to train from file
-parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task jsonfile --jsonfile-datapath tmp/bd_episode.txt --batchsize 32 --num-epochs 2 --truncate 128
-
+```
+## Train command (latest)
+```
+parlai train_model --model examples/seq2seq --model-file /tmp/example_model --task jsonfile --jsonfile-datapath tmp/out/bd_episode --jsonfile-datatype-extension true --batchsize 32 --num-epochs 2 --truncate 128
 ```
 
 
