@@ -55,15 +55,6 @@ except ImportError:
     BPE_INSTALLED = False
 
 try:
-    import maskrcnn_benchmark  # noqa: F401
-    import cv2  # noqa: F401
-
-    DETECTRON_AVAILABLE = True
-except ImportError:
-    DETECTRON_AVAILABLE = False
-
-
-try:
     import fairseq  # noqa: F401
 
     FAIRSEQ_AVAILABLE = True
@@ -130,15 +121,6 @@ def skipUnlessVision(testfn, reason='torchvision not installed'):
     Decorate a test to skip unless torchvision is installed.
     """
     return unittest.skipUnless(VISION_AVAILABLE, reason)(testfn)
-
-
-def skipUnlessDetectron(
-    testfn, reason='maskrcnn_benchmark and/or opencv not installed'
-):
-    """
-    Decorate a test to skip unless maskrcnn_benchmark and opencv are installed.
-    """
-    return unittest.skipUnless(DETECTRON_AVAILABLE, reason)(testfn)
 
 
 def skipUnlessFairseq(testfn, reason='fairseq not installed'):
@@ -215,9 +197,9 @@ def git_changed_files(skip_nonexisting=True):
 
     :param bool skip_nonexisting:
         If true, ignore files that don't exist on disk. This is useful for
-        disregarding files created in master, but don't exist in HEAD.
+        disregarding files created in main, but don't exist in HEAD.
     """
-    fork_point = git_.merge_base('origin/master', 'HEAD').strip()
+    fork_point = git_.merge_base('origin/main', 'HEAD').strip()
     filenames = git_.diff('--name-only', fork_point).split('\n')
     if skip_nonexisting:
         filenames = [fn for fn in filenames if PathManager.exists(fn)]
@@ -226,9 +208,9 @@ def git_changed_files(skip_nonexisting=True):
 
 def git_commit_messages():
     """
-    Output each commit message between here and master.
+    Output each commit message between here and main.
     """
-    fork_point = git_.merge_base('origin/master', 'HEAD').strip()
+    fork_point = git_.merge_base('origin/main', 'HEAD').strip()
     messages = git_.log(fork_point + '..HEAD')
     return messages
 

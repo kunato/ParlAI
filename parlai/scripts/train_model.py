@@ -23,8 +23,11 @@ parlai train_model --model seq2seq --task babi:Task10k:1 --model-file '/tmp/mode
 
 # TODO List:
 # * More logging (e.g. to files), make things prettier.
-
+import copy
+import random
+import torch
 import json
+import os
 import numpy as np
 import signal
 from typing import Tuple
@@ -42,14 +45,17 @@ from parlai.core.opt import Opt
 from parlai.core.params import ParlaiParser, print_announcements
 from parlai.core.worlds import create_task, World
 from parlai.scripts.build_dict import build_dict, setup_args as setup_dict_args
+from parlai.scripts.eval_model import get_task_world_logs
 from parlai.utils.distributed import (
     sync_object,
     is_primary_worker,
     all_gather_list,
     is_distributed,
+    get_rank,
     num_workers,
 )
 from parlai.utils.misc import Timer, nice_report
+from parlai.utils.world_logging import WorldLogger
 from parlai.core.script import ParlaiScript, register_script
 import parlai.utils.logging as logging
 from parlai.utils.io import PathManager
@@ -86,6 +92,12 @@ def setup_args(parser=None) -> ParlaiParser:
         '-et',
         '--evaltask',
         help='task to use for valid/test (defaults to the one used for training)',
+    )
+    train.add_argument(
+        '--final-extra-opt',
+        type=str,
+        default='',
+        help="A '.opt' file that is used for final eval. Useful for setting skip-generation to false. 'datatype' must be included as part of the opt.",
     )
     train.add_argument(
         '--eval-batchsize',
@@ -206,7 +218,7 @@ def setup_args(parser=None) -> ParlaiParser:
         '--validation-metric-mode',
         type=str,
         choices=['max', 'min'],
-        help='how to optimize validation metric (max or min)',
+        help='the direction in which to optimize the validation metric, i.e. maximize or minimize',
     )
     train.add_argument(
         '-vcut',
@@ -251,11 +263,30 @@ def setup_args(parser=None) -> ParlaiParser:
         help='Report micro-averaged metrics instead of macro averaged metrics.',
         recommended=False,
     )
+    train.add_argument(
+        '--world-logs',
+        type=str,
+        default='',
+        help='Saves a jsonl file of the world logs.'
+        'Set to the empty string to not save at all.',
+    )
+    train.add_argument(
+        '--save-format',
+        type=str,
+        default='conversations',
+        choices=['conversations', 'parlai'],
+    )
+    train.add_argument('--seed', type=int, default=None)
+    WorldLogger.add_cmdline_args(parser, partial_opt=None)
     TensorboardLogger.add_cmdline_args(parser, partial_opt=None)
     WandbLogger.add_cmdline_args(parser, partial_opt=None)
-
     parser = setup_dict_args(parser)
     return parser
+
+
+def set_seed(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def load_eval_worlds(agent, opt, datatype):
@@ -391,6 +422,9 @@ class TrainLoop:
         self.valid_optim = 1 if opt['validation_metric_mode'] == 'max' else -1
         self.train_reports = []
         self.valid_reports = []
+        self.final_valid_report = {}
+        self.final_test_report = {}
+        self.final_extra_valid_report = {}
         self.best_valid = None
 
         self.impatience = 0
@@ -466,7 +500,12 @@ class TrainLoop:
                 pass
 
     def _save_train_stats(self, suffix=None):
-        fn = self.opt['model_file']
+        if not is_primary_worker():
+            # never do IO as a non-primary worker
+            return
+        fn = self.opt.get('model_file', None)
+        if not fn:
+            return
         if suffix:
             fn += suffix
         fn += '.trainstats'
@@ -481,6 +520,11 @@ class TrainLoop:
                     'valid_reports': self.valid_reports,
                     'best_valid': self.best_valid,
                     'impatience': self.impatience,
+                    'final_valid_report': dict_report(self.final_valid_report),
+                    'final_test_report': dict_report(self.final_test_report),
+                    'final_extra_valid_report': dict_report(
+                        self.final_extra_valid_report
+                    ),
                 },
                 f,
                 indent=4,
@@ -582,19 +626,41 @@ class TrainLoop:
             return True
         return False
 
-    def _run_single_eval(self, opt, valid_world, max_exs):
+    def _run_single_eval(self, opt, valid_world, max_exs, datatype, is_multitask, task):
 
         # run evaluation on a single world
         valid_world.reset()
+
+        world_logger = None
+        task_opt = opt.copy()
+        # set up world logger for the "test" fold
+        if opt['world_logs'] and datatype == 'test':
+            task_opt['world_logs'] = get_task_world_logs(
+                task, opt['world_logs'], is_multitask
+            )
+            world_logger = WorldLogger(task_opt)
 
         cnt = 0
         max_cnt = max_exs if max_exs > 0 else float('inf')
         while not valid_world.epoch_done() and cnt < max_cnt:
             valid_world.parley()
+            if world_logger is not None:
+                world_logger.log(valid_world)
             if cnt == 0 and opt['display_examples']:
                 print(valid_world.display() + '\n~~')
                 print(valid_world.report())
             cnt = valid_world.report().get('exs') or 0
+
+        if world_logger is not None:
+            # dump world acts to file
+            world_logger.reset()  # add final acts to logs
+            if is_distributed():
+                rank = get_rank()
+                base_outfile, extension = os.path.splitext(task_opt['world_logs'])
+                outfile = base_outfile + f'_{rank}' + extension
+            else:
+                outfile = task_opt['world_logs']
+            world_logger.write(outfile, valid_world, file_format=opt['save_format'])
 
         valid_report = valid_world.report()
         if opt.get('validation_share_agent', False):
@@ -602,7 +668,15 @@ class TrainLoop:
 
         return valid_report
 
-    def _run_eval(self, valid_worlds, opt, datatype, max_exs=-1, write_log=False):
+    def _run_eval(
+        self,
+        valid_worlds,
+        opt,
+        datatype,
+        max_exs=-1,
+        write_log=False,
+        extra_log_suffix="",
+    ):
         """
         Eval on validation/test data.
 
@@ -623,8 +697,15 @@ class TrainLoop:
         reports = []
 
         max_exs_per_worker = max_exs / (len(valid_worlds) * num_workers())
-        for v_world in valid_worlds:
-            task_report = self._run_single_eval(opt, v_world, max_exs_per_worker)
+        is_multitask = len(valid_worlds) > 1
+        for index, v_world in enumerate(valid_worlds):
+            if opt.get('evaltask'):
+                task = opt['evaltask'].split(',')[index]
+            else:
+                task = opt['task'].split(',')[index]
+            task_report = self._run_single_eval(
+                opt, v_world, max_exs_per_worker, datatype, is_multitask, task
+            )
             reports.append(task_report)
 
         tasks = [world.getID() for world in valid_worlds]
@@ -642,10 +723,39 @@ class TrainLoop:
         # write to file
         if write_log and opt.get('model_file') and is_primary_worker():
             # Write out metrics
-            with PathManager.open(opt['model_file'] + '.' + datatype, 'a') as f:
+            with PathManager.open(
+                opt['model_file'] + extra_log_suffix + '.' + datatype, 'a'
+            ) as f:
                 f.write(f'{metrics}\n')
 
         return report
+
+    def _run_final_extra_eval(self, opt):
+        final_valid_opt = copy.deepcopy(opt)
+        final_valid_opt_raw = Opt.load_init(opt['final_extra_opt'])
+        final_datatype = final_valid_opt_raw["datatype"]
+        for k, v in final_valid_opt_raw.items():
+            final_valid_opt[k] = v
+        final_max_exs = (
+            final_valid_opt['validation_max_exs']
+            if final_valid_opt.get('short_final_eval')
+            else -1
+        )
+        final_valid_world = load_eval_worlds(
+            self.agent, final_valid_opt, final_datatype
+        )
+        final_valid_report = self._run_eval(
+            final_valid_world,
+            final_valid_opt,
+            final_datatype,
+            final_max_exs,
+            write_log=True,
+            extra_log_suffix="_extra",
+        )
+        if opt['wandb_log'] and is_primary_worker():
+            self.wb_logger.log_final(final_datatype, final_valid_report)
+
+        return final_valid_report
 
     def _sync_metrics(self, metrics):
         """
@@ -901,13 +1011,17 @@ class TrainLoop:
         # perform final validation/testing
         valid_worlds = load_eval_worlds(self.agent, opt, 'valid')
         max_exs = opt['validation_max_exs'] if opt.get('short_final_eval') else -1
-        v_report = self._run_eval(valid_worlds, opt, 'valid', max_exs, write_log=True)
+        self.final_valid_report = self._run_eval(
+            valid_worlds, opt, 'valid', max_exs, write_log=True
+        )
         test_worlds = load_eval_worlds(self.agent, opt, 'test')
-        t_report = self._run_eval(test_worlds, opt, 'test', max_exs, write_log=True)
+        self.final_test_report = self._run_eval(
+            test_worlds, opt, 'test', max_exs, write_log=True
+        )
 
         if opt['wandb_log'] and is_primary_worker():
-            self.wb_logger.log_final('valid', v_report)
-            self.wb_logger.log_final('test', t_report)
+            self.wb_logger.log_final('valid', self.final_valid_report)
+            self.wb_logger.log_final('test', self.final_test_report)
             self.wb_logger.finish()
 
         if valid_worlds:
@@ -919,7 +1033,15 @@ class TrainLoop:
 
         print_announcements(opt)
 
-        return v_report, t_report
+        if opt['final_extra_opt'] != '':
+            self.final_extra_valid_report = self._run_final_extra_eval(opt)
+
+        if opt['wandb_log'] and is_primary_worker():
+            self.wb_logger.finish()
+
+        self._save_train_stats()
+
+        return self.final_valid_report, self.final_test_report
 
 
 @register_script('train_model', aliases=['tm', 'train'])
@@ -930,6 +1052,8 @@ class TrainModel(ParlaiScript):
 
     def run(self):
         self.train_loop = TrainLoop(self.opt)
+        if self.opt['seed'] is not None:
+            set_seed(self.opt['seed'])
         return self.train_loop.train()
 
 

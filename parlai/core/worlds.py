@@ -29,7 +29,7 @@ All worlds are initialized with the following parameters:
     ``agents`` -- the set of agents that should be attached to the world,
         e.g. for DialogPartnerWorld this could be the teacher (that defines the
         task/dataset) and the learner agent. This is ignored in the case of
-        sharing, and the shared parameter is used instead to initalize agents.
+        sharing, and the shared parameter is used instead to initialize agents.
     ``shared`` (optional) -- if not None, contains any shared data used to construct
         this particular instantiation of the world. This data might have been
         initialized by another world, so that different agents can share the same
@@ -53,8 +53,9 @@ from parlai.core.opt import Opt
 from parlai.core.params import ParlaiParser
 from parlai.core.teachers import Teacher, create_task_agent_from_taskname
 from parlai.utils.data import DatatypeHelper
-from parlai.utils.misc import Timer, display_messages
+from parlai.utils.misc import Timer, display_messages, warn_once
 from parlai.tasks.tasks import ids_to_tasks
+from parlai.utils.misc import error_once
 
 
 def validate(observation):
@@ -256,13 +257,20 @@ class World(object):
         """
         Reset all agents in the world, and world statistics.
         """
-        for a in self.agents:
-            a.reset()
+        self.reset_agents()
         self.max_exs = None
         self.total_exs = 0
         self.total_epochs = 0
         self.total_parleys = 0
         self.time.reset()
+
+    def reset_agents(self):
+        """
+        Reset all agents in the world.
+        """
+        agents = self.get_agents()
+        for a in agents:
+            a.reset()
 
     def reset_metrics(self):
         """
@@ -554,10 +562,17 @@ class MultiWorld(World):
         self.parleys = -1
         # Check to see if we are training
         self.is_training = DatatypeHelper.is_training(opt.get('datatype'))
+        # Check to see if we should shuffle
+        self.should_shuffle = DatatypeHelper.should_shuffle(opt.get('datatype'))
         # Make multi-task task probabilities.
         self.cum_task_weights = [1] * len(self.worlds)
         self.task_choices = range(len(self.worlds))
         weights = self.opt.get('multitask_weights', [1])
+        # Warn about multi-task weights being ignored if we are in a datatype that doesn't involve shuffling
+        if weights != [1] and not self.should_shuffle:
+            warn_once(
+                f"WARNING: multitask weights are ignored for datatype {opt.get('datatype')} as we iterate through tasks in a round robin"
+            )
         if weights == 'stochastic':
             weights = [w.num_episodes() for w in self.worlds]
         sum = 0
@@ -573,12 +588,12 @@ class MultiWorld(World):
         for each_world in self.worlds:
             world_id = each_world.getID()
             if world_id in task_ids:
-                raise AssertionError(
-                    '{} and {} teachers have overlap in id {}.'.format(
-                        task_ids[world_id],
-                        each_world.get_agents()[0].__class__,
-                        world_id,
-                    )
+                world_class = each_world.get_agents()[0].__class__
+                error_once(
+                    f"{task_ids[world_id]} and {world_class} teachers have overlap "
+                    f"in id '{world_id}'. This will cause their metrics to be "
+                    "intermingled. Change the id attribute of one to remove this "
+                    "message."
                 )
             else:
                 task_ids[world_id] = each_world.get_task_agent()
@@ -664,7 +679,7 @@ class MultiWorld(World):
         if self.new_world:
             self.new_world = False
             self.parleys = 0
-            if self.is_training:
+            if self.should_shuffle:
                 # select random world
                 self.world_idx = random.choices(
                     self.task_choices, cum_weights=self.cum_task_weights

@@ -426,7 +426,14 @@ class FixedDialogTeacher(Teacher):
         else:
             self.index.value += 1
             if loop:
-                self.index.value %= num_eps
+                try:
+                    self.index.value %= num_eps
+                except ZeroDivisionError:
+                    raise ZeroDivisionError(
+                        "The teacher has either empty data (e.g. setup_data yielded "
+                        "no items, or self.num_episodes() == 0). We do not support "
+                        "empty datasets (or folds) at this time."
+                    )
             new_idx = self.index.value
         return new_idx
 
@@ -499,13 +506,13 @@ class FixedDialogTeacher(Teacher):
         """
         Get the number of episodes in this dataset.
         """
-        raise RuntimeError('"num_episodes" must be overriden by children.')
+        raise RuntimeError('"num_episodes" must be overridden by children.')
 
     def num_examples(self) -> int:
         """
         Get the total number of examples in this dataset.
         """
-        raise RuntimeError('"num_examples" must be overriden by children.')
+        raise RuntimeError('"num_examples" must be overridden by children.')
 
     def get(self, episode_idx, entry_idx=0):
         """
@@ -521,7 +528,7 @@ class FixedDialogTeacher(Teacher):
             single-entry episodes, so this defaults to zero.
         """
         # TODO: mark as abstract, get rid of runtime error.
-        raise RuntimeError('"Get" method must be overriden by children.')
+        raise RuntimeError('"Get" method must be overridden by children.')
 
     def observe(self, observation):
         """
@@ -680,7 +687,7 @@ class DialogTeacher(FixedDialogTeacher):
         new episodes.
 
         :param str datafile:
-            If the initializer set a 'datafile' field within the initalization,
+            If the initializer set a 'datafile' field within the initialization,
             this will be provided here. Otherwise, datafile will be the fold:
             either "train", "valid", or "test".
 
@@ -713,7 +720,7 @@ class DialogTeacher(FixedDialogTeacher):
         """
         Provide consistent label candidates for all examples.
 
-        Default implementation returns ``None`` always, but this may be overriden to
+        Default implementation returns ``None`` always, but this may be overridden to
         provide candidates in all areas. See ``FbDialogueTeacher``.
         """
         # TODO DEPRECATIONDAY: FbDialogueTeacher is being deprecated, should we
@@ -726,6 +733,8 @@ class DialogTeacher(FixedDialogTeacher):
         """
         Return the number of episodes in the data.
         """
+        if hasattr(self, "_num_episodes_cache"):
+            return self._num_episodes_cache
         try:
             return self.data.num_episodes()
         except AttributeError:
@@ -1058,6 +1067,7 @@ class StreamDialogData(DialogData):
             self.reset_data = shared['reset']
             # Share datafile and data_loader for computing num_exs and num_eps
             self.datafile = shared['datafile']
+            self.length_datafile = opt.get('length_datafile', None)
             self.data_loader = shared['data_loader']
             if 'lock' in shared:
                 self.lock = shared['lock']
@@ -1069,6 +1079,7 @@ class StreamDialogData(DialogData):
                     ERROR_MESSAGE_NO_DATAFILE.format(class_name=self.__class__.__name__)
                 )
             self.datafile = opt['datafile']
+            self.length_datafile = opt.get('length_datafile', None)
             self.reset_data = None
             self.is_reset = True
         self.entry_idx = 0
@@ -1128,8 +1139,13 @@ class StreamDialogData(DialogData):
         Note that this can take some time for large datasets. Episode and entry indexes
         cannot be specified during streaming.
         """
-        datafiles = self.datafile if type(self.datafile) is tuple else [self.datafile]
-        length_file = datafiles[0] + ".lengths"
+        if self.length_datafile:
+            length_file = self.length_datafile
+        else:
+            datafiles = (
+                self.datafile if type(self.datafile) is tuple else [self.datafile]
+            )
+            length_file = datafiles[0] + ".lengths"
         if not PathManager.exists(length_file):
             num_eps = 0
             num_exs = 0
@@ -1271,7 +1287,7 @@ class FbDeprecatedDialogTeacher(DialogTeacher):
 
     def share(self):
         """
-        Share the data and canidates.
+        Share the data and candidates.
         """
         shared = super().share()
         shared['cands'] = self.cands
@@ -1604,11 +1620,11 @@ class YamlTeacher(DialogTeacher):
                 yield act, next_episode_new
 
 
-class ConversationTeacher(FixedDialogTeacher):
+class ConversationTeacher(DialogTeacher):
     """
     This module provides access to data in the Conversations format.
 
-    Subclasses ``FixedDialogTeacher`` for functionality and provides an
+    Subclasses ``DialogTeacher`` for functionality and provides an
     implementation of ``setup_data()`` which iterates over datasets in the
     "Conversations" format. If your data is in the format below, use this class to
     handle file parsing for you.
@@ -1642,61 +1658,46 @@ class ConversationTeacher(FixedDialogTeacher):
     A set of examples X1 => Y1, X2 => Y2, and X3 => Y3 will be generated,
     forming one episode. However, Y1 => X2 and Y2 => X3 are not created as
     separate examples by default.
-    To change this behavior, you can set opt['label_turns']. The default
-    value is 'secondspeaker' (i.e., the second speaker's utterances are
+    To change this behavior, you can set ``opt['label_turns']`` or ``--label-turns flag``.
+    The default value is 'secondspeaker' (i.e., the second speaker's utterances are
     used as labels), but 'firstspeaker' and 'both' are also options. In the
     case of 'both', two episodes are generated for each conversation.
     """
 
-    def __init__(self, opt, shared=None):
-        super().__init__(opt, shared)
-        if not shared:
-            self.episodes = []
-            self.num_exs = 0
-            self.label_turns = opt.get('label_turns')
-            if opt.get('conversationteacher_datafile') is not None:
-                self._setup_data(opt.get('conversationteacher_datafile'))
-        else:
-            self.episodes = shared['episodes']
-            self.num_exs = sum(len(e) for e in self.episodes)
+    @classmethod
+    def add_cmdline_args(
+        cls, parser: ParlaiParser, partial_opt: Optional[Opt] = None
+    ) -> ParlaiParser:
+        agent = super().add_cmdline_args(parser, partial_opt)
+        agent.add_argument(
+            '--label-turns',
+            type=str,
+            help='which speaker to use as label',
+            choices=['firstspeaker', 'secondspeaker', 'both'],
+            default='secondspeaker',
+        )
+        return parser
 
+    def __init__(self, opt, shared=None):
+        if not opt.get('conversationteacher_datafile'):
+            raise RuntimeError('conversationteacher_datafile not specified')
+
+        opt = copy.deepcopy(opt)
+        opt['datafile'] = opt.get('conversationteacher_datafile')
+        self.label_turns = opt.get('label_turns')
+        super().__init__(opt, shared)
         self.id = opt['task']
 
-        self.reset()
+    def _return_episode_examples(self, episode):
+        for idx, example in enumerate(episode):
+            episode_begin = idx == 0
+            if 'episode_done' in example:
+                example.pop('episode_done')
+            yield example, episode_begin
 
-    def share(self):
-        """
-        Share the episodes.
-        """
-        shared = super().share()
-        shared['episodes'] = self.episodes
-        return shared
-
-    def num_examples(self):
-        """
-        Return the number of examples from the data.
-        """
-        return self.num_exs
-
-    def num_episodes(self):
-        """
-        Return the number of episodes from the data.
-        """
-        return len(self.episodes)
-
-    def get(self, episode_idx, entry_idx=None):
-        """
-        Get a specific example from the dataset.
-        """
-        return Message(self.episodes[episode_idx][entry_idx])
-
-    def _setup_data(self, path):
-        logging.info("[loading data from json file into task:" + path + "]")
-        self.episodes = []
-        self.num_exs = 0
-        eps = []
+    def setup_data(self, path):
+        logging.info(f"[loading data from json file into task: {path} ]")
         conversations = Conversations(path)
-        self.num_exs = 0
         for conv in conversations:
             if conv.context:
                 warn_once(
@@ -1712,15 +1713,15 @@ class ConversationTeacher(FixedDialogTeacher):
             if self.label_turns in ['firstspeaker', 'both']:
                 eps = self._get_ep_from_turns(turns[::2], turns[1::2])
                 if eps:
-                    self.episodes.append(eps)
-                    self.num_exs += len(eps)
+                    for example, example_begins in self._return_episode_examples(eps):
+                        yield example, example_begins
 
             # train on even turns as labels (turns w/ second speaker)
             if self.label_turns in ['secondspeaker', 'both']:
                 eps = self._get_ep_from_turns(turns[1::2], turns[2::2])
                 if eps:
-                    self.episodes.append(eps)
-                    self.num_exs += len(eps)
+                    for example, example_begins in self._return_episode_examples(eps):
+                        yield example, example_begins
 
     def _get_ep_from_turns(self, xturns, yturns):
         eps = []
@@ -1728,11 +1729,8 @@ class ConversationTeacher(FixedDialogTeacher):
             turn = {}
             turn['text'] = xturn.get('text').strip()
             turn['labels'] = [yturn.get('text').strip()]
-            turn['episode_done'] = False
             eps.append(turn)
-        if eps:
-            eps[-1]['episode_done'] = True
-            return eps
+        return eps
 
 
 class AbstractImageTeacher(FixedDialogTeacher):
@@ -1784,7 +1782,7 @@ class AbstractImageTeacher(FixedDialogTeacher):
         # avoid calculating image features twice.
         self.image_mode = opt.get('image_mode')
 
-        # Not using default image_mode paramater b/c there is a normalization
+        # Not using default image_mode parameter b/c there is a normalization
         # (or bug) somewhere in build_dict that is setting it to none
         self.include_image = opt.get('image_mode') != 'no_image_model'
 
@@ -1923,9 +1921,9 @@ class AbstractImageTeacher(FixedDialogTeacher):
         """
         Image features for the dataset images are stored here.
 
-        Can be overriden in subclass to use custom paths. Image features can be manually
-        copied into this directory or in the case of ImageLoader eligible models, they
-        will be built and stored here if not already there.
+        Can be overridden in subclass to use custom paths. Image features can be
+        manually copied into this directory or in the case of ImageLoader eligible
+        models, they will be built and stored here if not already there.
         """
         # In default implementation, self.data_path already has task name added
         image_features_path = os.path.join(self.data_path, 'image_features')
@@ -1942,7 +1940,7 @@ class AbstractImageTeacher(FixedDialogTeacher):
 
         Users may wish to compute features for the dataset offline and use in the model,
         in which case, the image model should return False and get_image_features()
-        should be overriden in subclass.
+        should be overridden in subclass.
         """
         return model_name in ImageLoader.get_available_model_names()
 
@@ -1984,7 +1982,7 @@ class AbstractImageTeacher(FixedDialogTeacher):
         Load text and image data.
 
         The image features all live in dicts by default in <data_path>/
-        image_features/ but get_image_features_path() above can be overriden by
+        image_features/ but get_image_features_path() above can be overridden by
         subclass to put them elsewhere.
 
         In the (very odd) case that the resnet or resnext dicts (models
@@ -2079,7 +2077,7 @@ class AbstractImageTeacher(FixedDialogTeacher):
         """
         Get image features for example.
 
-        Can be overrided in subclass for different behavior. For large datasets, it may
+        Can be overridden in subclass for different behavior. For large datasets, it may
         be more appropriate to use the ImageLoader.load() method to load image features
         (as this is essentially streaming the features from disk, so that we do not have
         to load a large image feature dict in memory). #TODO Could be the default option

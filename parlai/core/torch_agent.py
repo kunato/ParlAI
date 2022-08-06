@@ -467,7 +467,7 @@ class TorchAgent(ABC, Agent):
         """
         Return the dictionary class that this agent expects to use.
 
-        Can be overriden if a more complex dictionary is required.
+        Can be overridden if a more complex dictionary is required.
         """
         return DictionaryAgent
 
@@ -476,7 +476,7 @@ class TorchAgent(ABC, Agent):
         """
         Return the history class that this agent expects to use.
 
-        Can be overriden if a more complex history is required.
+        Can be overridden if a more complex history is required.
         """
         return History
 
@@ -779,7 +779,7 @@ class TorchAgent(ABC, Agent):
             self.fp16_impl = self.opt.get('fp16_impl', 'safe')
 
         if shared is None:
-            # intitialize any important structures from scratch
+            # intialize any important structures from scratch
             self.dict = self.build_dictionary()
 
             if opt.get('fp16') or opt.get('force_fp16_tokens'):
@@ -1609,7 +1609,7 @@ class TorchAgent(ABC, Agent):
         return obs
 
     def _pad_tensor(
-        self, items: List[Union[List[int], torch.LongTensor]]
+        self, items: List[Union[List[int], torch.LongTensor]], is_label: bool = False
     ) -> Tuple[torch.LongTensor, List[int]]:
         """
         Create a right padded matrix from an uneven list of lists.
@@ -1618,6 +1618,7 @@ class TorchAgent(ABC, Agent):
         is a list containing the lengths of each row.
 
         :param list[iter[int]] items: List of items
+        :param bool is_label: True if items are labels, False if contexts.
         :returns: (padded, lengths) tuple
         :rtype: (Tensor[int64], list[int])
 
@@ -1644,7 +1645,7 @@ class TorchAgent(ABC, Agent):
         Returns a namedtuple Batch. See original definition above for in-depth
         explanation of each field.
 
-        If you want to include additonal fields in the batch, you can subclass
+        If you want to include additional fields in the batch, you can subclass
         this function and return your own "Batch" namedtuple: copy the Batch
         namedtuple at the top of this class, and then add whatever additional
         fields that you want to be able to access. You can then call
@@ -1716,7 +1717,7 @@ class TorchAgent(ABC, Agent):
             labels = [ex.get(field + '_choice') for ex in exs]
             y_lens = [y.shape[0] for y in label_vecs]
 
-            ys, y_lens = self._pad_tensor(label_vecs)
+            ys, y_lens = self._pad_tensor(label_vecs, is_label=True)
 
             if sort and xs is None:
                 ys, valid_inds, label_vecs, labels, y_lens = argsort(
@@ -1813,7 +1814,7 @@ class TorchAgent(ABC, Agent):
         between the original history and the temporary history. If you require
         such delimiter or spacing, you should include it in the temp history.
 
-        Intentionally overrideable so more complex models can insert temporary history
+        Intentionally overridable so more complex models can insert temporary history
         strings, i.e. strings that are removed from the history after a single turn.
         """
         return observation.get('temp_history')
@@ -2113,6 +2114,10 @@ class TorchAgent(ABC, Agent):
             # model it MUST add the fp16 tokens, even if it's not fp16 mode now.
             opt_from_disk['force_fp16_tokens'] = True
 
+        if opt_from_disk.get('image_mode') == 'none':
+            # 2022-03-28 this mode changed to 'no_image_model' a long time ago.
+            opt_from_disk['image_mode'] = 'no_image_model'
+
         return opt_from_disk
 
     def reset(self):
@@ -2246,7 +2251,7 @@ class TorchAgent(ABC, Agent):
         for k, values in self._local_metrics.items():
             if len(values) != len(batch.valid_indices):
                 raise IndexError(
-                    f"Batchsize mismatch on metric {k} (got {len(values)}, "
+                    f"Batchsize mismatch on metric {k} got {len(values)}, "
                     f"expected {len(batch.valid_indices)}"
                 )
             for i, value in zip(batch.valid_indices, values):
@@ -2306,18 +2311,18 @@ class TorchAgent(ABC, Agent):
             self._number_grad_accum = (self._number_grad_accum + 1) % update_freq
 
             # we're doing gradient accumulation, so we don't need to sync gradients
-            # amoung GPUs
+            # among GPUs
             if self._number_grad_accum != 0 and is_distributed():
                 # accumulate without syncing
                 with self.model.no_sync():
                     if self.fp16:
-                        self.optimizer.backward(loss, update_master_grads=False)
+                        self.optimizer.backward(loss, update_main_grads=False)
                     else:
                         loss.backward()
                 return
 
         if self.fp16:
-            self.optimizer.backward(loss, update_master_grads=False)
+            self.optimizer.backward(loss, update_main_grads=False)
         else:
             loss.backward()
 
@@ -2342,13 +2347,13 @@ class TorchAgent(ABC, Agent):
         if self.fp16:
             # we've been accumulating grads in fp16 and delaying the fp32 copy update.
             # finally time to perform the update.
-            self.optimizer.update_master_grads()
+            self.optimizer.update_main_grads()
 
         if self.opt.get('gradient_clip', -1) > 0 or self.fp16:
             if self.fp16:
                 # clip grad norm is where we check for fp16 overflows, so we need
                 # to do it regardless of whether gradient clipping is off
-                grad_norm = self.optimizer.clip_master_grads(self.opt['gradient_clip'])
+                grad_norm = self.optimizer.clip_main_grads(self.opt['gradient_clip'])
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.opt['gradient_clip']

@@ -1,3 +1,10 @@
+**WARNING**
+
+This project has been archived. If you need to use this project, please revert
+to ParlAI 1.4.1.
+
+------
+
 # Multi-Modal Open-Domain Dialogue
 
 Kurt Shuster<sup>∗</sup>, Eric Michael Smith<sup>∗</sup>, Da Ju, Jason Weston
@@ -18,7 +25,7 @@ Recent work in open-domain conversational agents has demonstrated that significa
 
 ## Code and models
 
-See the [model card](https://github.com/facebookresearch/ParlAI/blob/master/parlai/zoo/multimodal_blenderbot/README.md) for details.
+See the [model card](https://github.com/facebookresearch/ParlAI/blob/main/parlai/zoo/multimodal_blenderbot/README.md) for details.
 
 ## Citation
 

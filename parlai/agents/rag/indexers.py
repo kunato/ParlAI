@@ -6,7 +6,7 @@
 """
 FAISS-based Indexers.
 
-Adapated from https://github.com/facebookresearch/DPR/blob/master/dpr/indexer/faiss_indexers.py
+Adapted from https://github.com/facebookresearch/DPR/blob/main/dpr/indexer/faiss_indexers.py
 """
 from parlai.core.build_data import modelzoo_path
 from parlai.core.opt import Opt
@@ -55,7 +55,7 @@ class BaseIndexer(ABC):
             self.faiss = faiss
         except ImportError:
             raise ImportError(
-                'Please install faiss: https://github.com/facebookresearch/faiss/blob/master/INSTALL.md'
+                'Please install faiss: https://github.com/facebookresearch/faiss/blob/main/INSTALL.md'
             )
 
     @abstractmethod
@@ -211,7 +211,7 @@ class DenseHNSWFlatIndexer(BaseIndexer):
                 'HNSW index needs to index all data at once, results will be unpredictable otherwise.'
             )
         phi = 0
-        norms = (data ** 2).sum(dim=1)
+        norms = (data**2).sum(dim=1)
         max_norms = norms.max().item()
         phi = max(phi, max_norms)
         logging.info(f'HNSWF DotProduct -> L2 space phi={phi}')

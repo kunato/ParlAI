@@ -19,6 +19,9 @@ from parlai.crowdsourcing.utils.mturk import MTurkRunScriptConfig
 
 
 """
+Read parlai/crowdsourcing/README.md to learn how to launch
+crowdsourcing tasks with this script.
+
 Script for running ACUTE-Evals.
 The only argument that *must* be set for this to be run is:
 ``pairings_filepath``:  Path to pairings file in the format specified in the README.md
@@ -30,12 +33,9 @@ The following args are useful to tweak to fit your specific needs;
 
 """
 
-defaults = [
-    {"mephisto/blueprint": BLUEPRINT_TYPE},
-    {"mephisto/architect": "local"},
-    {"mephisto/provider": "mock"},
-    {"conf": "example"},
-]
+_ = BLUEPRINT_TYPE
+
+defaults = ["_self_", {"conf": "example"}]
 
 
 @dataclass
@@ -53,7 +53,7 @@ class ScriptConfig(MTurkRunScriptConfig):
 register_script_config(name='scriptconfig', module=ScriptConfig)
 
 
-@hydra.main(config_name="scriptconfig")
+@hydra.main(config_path="hydra_configs", config_name="scriptconfig")
 def main(cfg: DictConfig) -> None:
     db, cfg = load_db_and_process_config(cfg)
     print(f'*** RUN ID: {cfg.mephisto.task.task_name} ***')

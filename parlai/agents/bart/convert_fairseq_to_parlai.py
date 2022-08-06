@@ -146,7 +146,7 @@ class ConversionScript(ParlaiScript):
         :return opt:
             opt parsed by ParlAI Parser
         """
-        # assume encoder/decoder symetrical except for number of layers
+        # assume encoder/decoder symmetrical except for number of layers
         state = self.state
         fairseq_args = state['args'].__dict__
 
@@ -251,7 +251,7 @@ class ConversionScript(ParlaiScript):
                     f, map_location=lambda s, l: default_restore_location(s, "cpu")
                 )
             except ModuleNotFoundError:
-                raise ModuleNotFoundError(
+                raise RuntimeError(
                     "Please install fairseq: https://github.com/pytorch/fairseq#requirements-and-installation"
                 )
 

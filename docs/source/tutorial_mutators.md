@@ -68,6 +68,22 @@ parlai display_data -t dailydialog:mutators=word_shuffle,convai2:mutators=flatte
 ```
 
 
+### Mutator arguments
+
+Some mutators have additional arguments. For example, `episode_shuffle` has an
+argument `preserve_context`.
+
+```bash
+parlai display_data -t dailydialog --mutators episode_shuffle --preserve_context True
+```
+
+Unfortunately, mutator arguments cannot be directly specified when using the `--task X:mutators=` format.  Instead, we can pass mutator arguments through the task argument.
+
+```bash
+parlai display_data -t dailydialog:mutators=episode_shuffle:preserve_context=True
+```
+
+
 ## Writing your own Mutators
 
 Mutators are meant to be added too. Following other patterns in ParlAI, you can
@@ -75,7 +91,7 @@ add your own mutators by making sure you decorate your Mutator class with
 `@register_mutator("example_name")` before the script runs if you're
 using ParlAI in an IPython notebook; if you've checked out ParlAI code locally
 to make your own modifications, you can add a new file in
-[`parlai/mutators`](https://github.com/facebookresearch/ParlAI/tree/master/parlai/mutators).
+[`parlai/mutators`](https://github.com/facebookresearch/ParlAI/tree/main/parlai/mutators).
 
 ParlAI has 3 base classes for Mutators. Choosing the right base class is only about
 making bookkeeping easier.
@@ -98,10 +114,10 @@ Reference](core/mutators). As additional resources, we provide the following
 examples:
 
 - [Word
-  Shuffle](https://github.com/facebookresearch/ParlAI/tree/master/parlai/mutators/word_shuffle.py):
+  Shuffle](https://github.com/facebookresearch/ParlAI/tree/main/parlai/mutators/word_shuffle.py):
   shows how to implement a simple `MessageMutator`.
 - [Episode
-  Reverse](https://github.com/facebookresearch/ParlAI/tree/master/parlai/mutators/episode_reverse.py):
+  Reverse](https://github.com/facebookresearch/ParlAI/tree/main/parlai/mutators/episode_reverse.py):
   shows how to implement a simple `EpisodeMutator`.
-- [Flatten](https://github.com/facebookresearch/ParlAI/tree/master/parlai/mutators/flatten.py):
+- [Flatten](https://github.com/facebookresearch/ParlAI/tree/main/parlai/mutators/flatten.py):
   shows how to implement a `ManyEpisodeMutator`.

@@ -10,15 +10,75 @@ Basic tests that ensure train_model.py behaves in predictable ways.
 import os
 import unittest
 import json
+import parlai.utils.logging as logging
 import parlai.utils.testing as testing_utils
+from parlai.utils.io import PathManager
 from parlai.core.metrics import AverageMetric
 from parlai.core.worlds import create_task
+from parlai.core.opt import Opt
 from parlai.core.params import ParlaiParser
 from parlai.core.agents import register_agent, Agent
-from parlai.utils.data import DatatypeHelper
+from parlai.scripts.eval_model import get_task_world_logs
 
 
 class TestTrainModel(unittest.TestCase):
+    def test_final_extra_eval_and_save_json(self):
+        """
+        Test "final_extra_valid_opt_filepath". Happens to test that saving reports as
+        json works too.
+
+        We copy train_model from testing_utils to directly access train loop.
+        """
+        import parlai.scripts.train_model as tms
+
+        def get_tl(tmpdir):
+            final_opt = Opt(
+                {
+                    'task': 'integration_tests',
+                    'datatype': 'valid',
+                    'validation_max_exs': 30,
+                    'short_final_eval': True,
+                }
+            )
+            final_opt.save(os.path.join(tmpdir, "final_opt.opt"))
+
+            opt = Opt(
+                {
+                    'task': 'integration_tests',
+                    'validation_max_exs': 10,
+                    'model': 'repeat_label',
+                    'model_file': os.path.join(tmpdir, 'model'),
+                    'short_final_eval': True,
+                    'num_epochs': 1.0,
+                    'final_extra_opt': str(os.path.join(tmpdir, "final_opt.opt")),
+                }
+            )
+            parser = tms.setup_args()
+            parser.set_params(**opt)
+            popt = parser.parse_args([])
+            for k, v in opt.items():
+                popt[k] = v
+            return tms.TrainLoop(popt)
+
+        with testing_utils.capture_output(), testing_utils.tempdir() as tmpdir:
+            tl = get_tl(tmpdir)
+            _, _ = tl.train()
+
+            with open(os.path.join(tmpdir, 'model.trainstats')) as f:
+                data = json.load(f)
+                print(data)
+                self.assertEqual(
+                    data["final_valid_report"]["exs"],
+                    10,
+                    "Validation exs saved incorrectly",
+                )
+
+                self.assertEqual(
+                    data["final_extra_valid_report"]["exs"],
+                    30,
+                    "Final validation exs saved incorrectly",
+                )
+
     def test_fast_final_eval(self):
         valid, test = testing_utils.train_model(
             {
@@ -107,13 +167,12 @@ class TestTrainModel(unittest.TestCase):
         )
 
     def test_multitasking_id_overlap(self):
-        with self.assertRaises(AssertionError) as context:
-            pp = ParlaiParser()
-            opt = pp.parse_args(['--task', 'integration_tests,integration_tests'])
+        pp = ParlaiParser()
+        opt = pp.parse_args(['--task', 'integration_tests,integration_tests'])
+        with self.assertLogs(logging.logger) as cm:
             self.world = create_task(opt, None)
-            self.assertTrue(
-                'teachers have overlap in id integration_tests.'
-                in str(context.exception)
+            self.assertIn(
+                "have overlap in id 'integration_tests'", "\n".join(cm.output)
             )
 
     def _test_opt_step_opts(self, update_freq: int):
@@ -165,6 +224,108 @@ class TestTrainModel(unittest.TestCase):
 
     def test_opt_step_update_freq_2(self):
         self._test_opt_step_opts(2)
+
+    def test_save_world_logs(self):
+        """
+        Test that we can save world logs from train model.
+        """
+        with testing_utils.tempdir() as tmpdir:
+            log_report = os.path.join(tmpdir, 'world_logs.jsonl')
+            valid, test = testing_utils.train_model(
+                {
+                    'task': 'integration_tests',
+                    'validation_max_exs': 10,
+                    'model': 'repeat_label',
+                    'short_final_eval': True,
+                    'num_epochs': 1.0,
+                    'world_logs': log_report,
+                }
+            )
+            with PathManager.open(log_report) as f:
+                json_lines = f.readlines()
+            assert len(json_lines) == 10
+
+    def test_save_multiple_world_logs(self):
+        """
+        Test that we can save multiple world_logs from train model on multiple tasks.
+        """
+        with testing_utils.tempdir() as tmpdir:
+            log_report = os.path.join(tmpdir, 'world_logs.jsonl')
+            multitask = 'integration_tests,integration_tests:ReverseTeacher'
+            valid, test = testing_utils.train_model(
+                {
+                    'task': multitask,
+                    'validation_max_exs': 10,
+                    'model': 'repeat_label',
+                    'short_final_eval': True,
+                    'num_epochs': 1.0,
+                    'world_logs': log_report,
+                }
+            )
+
+            for task in multitask.split(','):
+                task_log_report = get_task_world_logs(
+                    task, log_report, is_multitask=True
+                )
+                with PathManager.open(task_log_report) as f:
+                    json_lines = f.readlines()
+                assert len(json_lines) == 5
+
+    def test_save_multiple_world_logs_evaltask(self):
+        """
+        Test that we can save multiple world_logs from train model on multiple tasks
+        where there are more evaltasks than tasks.
+        """
+        with testing_utils.tempdir() as tmpdir:
+            log_report = os.path.join(tmpdir, 'world_logs.jsonl')
+            multitask = 'integration_tests,integration_tests:ReverseTeacher'
+            evaltask = 'integration_tests,integration_tests:mutators=flatten,integration_tests:ReverseTeacher:mutator=reverse'
+            valid, test = testing_utils.train_model(
+                {
+                    'task': multitask,
+                    'evaltask': evaltask,
+                    'validation_max_exs': 10,
+                    'model': 'repeat_label',
+                    'short_final_eval': True,
+                    'num_epochs': 1.0,
+                    'world_logs': log_report,
+                }
+            )
+
+            for task in evaltask.split(','):
+                task_log_report = get_task_world_logs(
+                    task, log_report, is_multitask=True
+                )
+                with PathManager.open(task_log_report) as f:
+                    json_lines = f.readlines()
+                assert len(json_lines) == 4
+
+    def test_save_multiple_world_logs_mutator(self):
+        """
+        Test that we can save multiple world_logs from train model on multiple tasks
+        with mutators present.
+        """
+        with testing_utils.tempdir() as tmpdir:
+            log_report = os.path.join(tmpdir, 'world_logs.jsonl')
+            multitask = 'integration_tests:mutators=flatten,integration_tests:ReverseTeacher:mutator=reverse'
+            valid, test = testing_utils.train_model(
+                {
+                    'task': multitask,
+                    'validation_max_exs': 10,
+                    'model': 'repeat_label',
+                    'short_final_eval': True,
+                    'num_epochs': 1.0,
+                    'world_logs': log_report,
+                }
+            )
+
+            for task in multitask.split(','):
+                task_log_report = get_task_world_logs(
+                    task, log_report, is_multitask=True
+                )
+                with PathManager.open(task_log_report) as f:
+                    json_lines = f.readlines()
+                assert len(json_lines) == 5
 
 
 @register_agent("fake_report")

@@ -8,19 +8,28 @@ Leveraging Passage Retrieval with Generative Models for Open Domain Question Ans
 
 See https://arxiv.org/abs/2007.01282
 """
+from abc import abstractmethod
 from copy import deepcopy
 import torch
+import random
 from typing import Tuple, Union, Optional, List, Dict, Any
 
 from parlai.core.dict import DictionaryAgent
 from parlai.core.opt import Opt
+from parlai.core.message import Message
 from parlai.agents.transformer.transformer import TransformerGeneratorModel
 
 from parlai.agents.rag.args import RetrieverType
 from parlai.agents.rag.modules import RagModel, Document, T5RagModel
 from parlai.agents.rag.rag import RagAgent
-from parlai.agents.rag.model_types import RagToken, get_forced_decoder_inputs
+from parlai.agents.rag.model_types import (
+    RagToken,
+    get_forced_decoder_inputs,
+    fix_incremental_state,
+)
 from parlai.utils.typing import TShared
+import parlai.utils.logging as logging
+from parlai.tasks.wizard_of_internet import constants as consts
 
 
 class Fid(RagToken):
@@ -66,7 +75,7 @@ class FidModel(RagModel):
 
     def __init__(self, opt: Opt, dictionary: DictionaryAgent, retriever_shared=None):
         super().__init__(opt, dictionary, retriever_shared=retriever_shared)
-        self.rag_model_interface = Fid(opt, dictionary[dictionary.null_token])
+        self._rag_model_interface = Fid(opt, dictionary[dictionary.null_token])
         self.embedding_size = opt['embedding_size']
 
     def reorder_encoder_states(
@@ -83,6 +92,25 @@ class FidModel(RagModel):
         return TransformerGeneratorModel.reorder_encoder_states(
             self, (enc, mask), indices
         )
+
+    def reorder_decoder_incremental_state(
+        self, incremental_state: Dict[int, dict], inds: torch.Tensor
+    ) -> Dict[int, dict]:
+        """
+        Override RagModel.reorder_decoder_incremental_state to resort back to normal
+        reordering.
+
+        See ``TorchGeneratorModel.reorder_decoder_incremental_state`` for a description.
+        """
+        incremental_state = fix_incremental_state(
+            self.generation_model, incremental_state
+        )
+        if not incremental_state:
+            return incremental_state
+        return {
+            idx: layer.reorder_incremental_state(incremental_state[idx], inds)
+            for idx, layer in enumerate(self.seq2seq_decoder.layers)
+        }
 
     def encoder(
         self,
@@ -266,9 +294,15 @@ class SearchQueryFiDAgent(FidAgent):
         group.add_argument(
             '--doc-chunks-ranker',
             type=str,
-            choices=['tfidf', 'head'],
+            choices=['tfidf', 'head', 'woi_chunk_retrieved_docs'],
             default='head',
             help='How to rank doc chunks.',
+        )
+        parser.add_argument(
+            '--woi-doc-chunk-size',
+            default=500,
+            type=int,
+            help='Document chunk size (in characters).',
         )
 
         return parser
@@ -284,7 +318,7 @@ class SearchQuerySearchEngineFiDAgent(SearchQueryFiDAgent):
     def add_cmdline_args(cls, parser, partial_opt=None):
         super().add_cmdline_args(parser, partial_opt=partial_opt)
         group = parser.add_argument_group('Search Engine FiD Params')
-        group.add_argument('--search-server', type=str, help='A search server addrees.')
+        group.add_argument('--search-server', type=str, help='A search server address.')
         return parser
 
 
@@ -295,12 +329,140 @@ class SearchQueryFAISSIndexFiDAgent(SearchQueryFiDAgent):
         super().__init__(opt, shared=shared)
 
 
+class GoldDocRetrieverFiDAgent(SearchQueryFiDAgent):
+    """
+    Uses the gold retrieved docs (documents shown to crowdsourcing agents).
+
+    This FiD agents has a mock retriever that picks the retrieved docs from the observed
+    example.
+    """
+
+    def __init__(self, opt: Opt, shared: TShared = None):
+        opt = deepcopy(opt)
+        opt['rag_retriever_type'] = RetrieverType.OBSERVATION_ECHO_RETRIEVER.value
+        self._n_docs = opt['n_docs']
+        if opt['rag_retriever_query'] != 'full_history':
+            prev_sel = opt['rag_retriever_query']
+            opt['rag_retriever_query'] = 'full_history'
+            logging.warning(
+                'GoldDocRetrieverFiDAgent only works with `rag_retriever_query` being `"full_history"`. '
+                f'Changing opt value for `rag_retriever_query`: `"{prev_sel}"` -> `"full_history"`'
+            )
+        if not (
+            opt['dynamic_batching'] in [None, 'off']
+            and opt.get('eval_dynamic_batching') in [None, 'off']
+        ):
+            raise RuntimeError(
+                "For now dynamic batching doesn't work with ObservationEchoRetriever as it cleans up _saved_docs mapping after each batch act."
+            )
+        super().__init__(opt, shared=shared)
+
+    @abstractmethod
+    def get_retrieved_knowledge(self, message):
+        """
+        Extracts the retrieved knowledge from the message.
+        """
+
+    def show_observation_to_echo_retriever(self, observation: Message):
+        retrieved_docs = self.get_retrieved_knowledge(observation)
+        if len(retrieved_docs) > self._n_docs:
+            logging.warning(
+                f'Your `get_retrieved_knowledge` method returned {len(retrieved_docs)} Documents, '
+                f'instead of the expected {self._n_docs} (set by `--n-docs`). '
+                f'This agent will only use the first {self._n_docs} Documents. '
+                'Consider modifying your implementation of `get_retrieved_knowledge` to avoid unexpected results. '
+                '(or alternatively you may increase `--n-docs` parameter)'
+            )
+            retrieved_docs = retrieved_docs[: self._n_docs]
+        self.model_api.retriever.add_retrieve_doc(
+            observation[self._query_key], retrieved_docs
+        )
+
+    def _set_query_vec(self, observation: Message) -> Message:
+        self.show_observation_to_echo_retriever(observation)
+        super()._set_query_vec(observation)
+
+    def batch_act(self, observations):
+        """
+        Clear the _saved_docs and _query_ids mappings in ObservationEchoRetriever.
+        """
+        batch_reply = super().batch_act(observations)
+        if hasattr(self.model_api.retriever, 'clear_mapping'):
+            self.model_api.retriever.clear_mapping()
+        return batch_reply
+
+
+class WizIntGoldDocRetrieverFiDAgent(GoldDocRetrieverFiDAgent):
+    """
+    Gold knowledge FiD agent for the Wizard of Internet task.
+    """
+
+    def _extract_doc_from_message(self, message: Message, idx: int):
+        """
+        Returns the `idx`-th `__retrieved-docs__` in the `message` as a Document object.
+        """
+        return Document(
+            docid=message[consts.RETRIEVED_DOCS_URLS][idx],
+            title=message[consts.RETRIEVED_DOCS_TITLES][idx],
+            text=message[consts.RETRIEVED_DOCS][idx],
+        )
+
+    def get_retrieved_knowledge(self, message: Message):
+
+        retrieved_docs = []
+        if not message.get(consts.RETRIEVED_DOCS):
+            return retrieved_docs
+
+        # First adding the docs with selected sentences.
+        selected_sentences = message[consts.SELECTED_SENTENCES]
+        n_docs_in_message = len(message[consts.RETRIEVED_DOCS])
+        already_added_doc_idx = []
+
+        if ' '.join(selected_sentences) == consts.NO_SELECTED_SENTENCES_TOKEN:
+            return retrieved_docs  # `retrieved_docs` is empty at this point
+
+        for doc_idx in range(n_docs_in_message):
+            doc_content = message[consts.RETRIEVED_DOCS][doc_idx]
+            for sel_sentc in selected_sentences:
+                if sel_sentc in doc_content and doc_idx not in already_added_doc_idx:
+                    retrieved_docs.append(
+                        self._extract_doc_from_message(message, doc_idx)
+                    )
+                    already_added_doc_idx.append(doc_idx)
+                    break
+            if len(retrieved_docs) == self._n_docs and doc_idx != (self._n_docs - 1):
+                logging.warning(
+                    f'More than {self._n_docs} documents have selected sentences. Trimming them to the first {self._n_docs}'
+                )
+                break
+
+        # Then adding other (filler) docs.
+        # We add them by iterating forward in the __retrieved-docs__ list for repeatability,
+        # but we shuffle the order of the final retruned docs, to make sure model doesn't cheat.
+        for doc_idx in range(n_docs_in_message):
+            if len(retrieved_docs) == self._n_docs:
+                break
+
+            if doc_idx in already_added_doc_idx:
+                continue
+
+            retrieved_docs.append(self._extract_doc_from_message(message, doc_idx))
+
+        if n_docs_in_message > len(retrieved_docs):
+            logging.debug(
+                f'Trimmed retrieved docs from {n_docs_in_message} to {len(retrieved_docs)}'
+            )
+        random.shuffle(retrieved_docs)
+        return retrieved_docs
+
+
 def concat_enc_outs(
     input: torch.LongTensor,
     enc_out: torch.Tensor,
     mask: torch.BoolTensor,
     embedding_size: int,
     padding_idx: int,
+    right_padded: bool = True,
 ) -> Tuple[torch.Tensor, torch.BoolTensor]:
     """
     Concatenate Encoder Outputs.
@@ -318,6 +480,8 @@ def concat_enc_outs(
         emb/hidden size of the enc representations
     :param padding_idx:
         pad token index; used for mask purposes.
+    :param right_padded:
+        whether the input is right padded (true) or left padded (false)
 
     :return (new_out, new_mask):
         return the encoder output and encoder mask, appropriately concatenated.
@@ -340,7 +504,11 @@ def concat_enc_outs(
     new_mask.fill_(False)
 
     for i, (out_i, length_i) in enumerate(zip(concat_outs, concat_lengths)):
-        new_out[i, :length_i] = out_i
-        new_mask[i, :length_i] = True
+        if right_padded:
+            new_out[i, :length_i] = out_i
+            new_mask[i, :length_i] = True
+        else:
+            new_out[i, new_out.size(1) - length_i :] = out_i
+            new_mask[i, new_out.size(1) - length_i :] = True
 
     return new_out, new_mask

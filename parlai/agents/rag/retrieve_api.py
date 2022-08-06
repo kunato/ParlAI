@@ -75,23 +75,40 @@ class SearchEngineRetriever(RetrieverAPI):
     Queries a server (eg, search engine) for a set of documents.
 
     This module relies on a running HTTP server. For each retrieval it sends the query
-    to this server and receieves a JSON; it parses the JSON to create the the response.
+    to this server and receives a JSON; it parses the JSON to create the response.
     """
 
     def __init__(self, opt: Opt):
         super().__init__(opt=opt)
         self.server_address = self._validate_server(opt.get('search_server'))
+        self._server_timeout = (
+            opt['search_server_timeout']
+            if opt.get('search_server_timeout', 0) > 0
+            else None
+        )
+        self._max_num_retries = opt.get('max_num_retries', 0)
 
     def _query_search_server(self, query_term, n):
         server = self.server_address
         req = {'q': query_term, 'n': n}
-        logging.debug(f'sending search request to {server}')
-        server_response = requests.post(server, data=req)
-        resp_status = server_response.status_code
-        if resp_status == 200:
-            return server_response.json().get('response', None)
+        trials = []
+        while True:
+            try:
+                logging.debug(f'sending search request to {server}')
+                server_response = requests.post(
+                    server, data=req, timeout=self._server_timeout
+                )
+                resp_status = server_response.status_code
+                trials.append(f'Response code: {resp_status}')
+                if resp_status == 200:
+                    return server_response.json().get('response', None)
+            except requests.exceptions.Timeout:
+                if len(trials) > self._max_num_retries:
+                    break
+                trials.append(f'Timeout after {self._server_timeout} seconds.')
         logging.error(
-            f'Failed to retrieve data from server! Search server returned status {resp_status}'
+            f'Failed to retrieve data from server after  {len(trials)+1} trials.'
+            f'\nFailed responses: {trials}'
         )
 
     def _validate_server(self, address):
@@ -100,7 +117,7 @@ class SearchEngineRetriever(RetrieverAPI):
         if address.startswith('http://') or address.startswith('https://'):
             return address
         PROTOCOL = 'http://'
-        logging.warning(f'No portocol provided, using "{PROTOCOL}"')
+        logging.warning(f'No protocol provided, using "{PROTOCOL}"')
         return f'{PROTOCOL}{address}'
 
     def _retrieve_single(self, search_query: str, num_ret: int):

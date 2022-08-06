@@ -20,8 +20,12 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
     """
     Class to compile results from static turn annotations.
 
-    Change PROBLEM_BUCKETS in task_config/annotation_buckets.json to be the buckets that
+    Change PROBLEM_BUCKETS in task_config/annotations_config.json to be the buckets that
     you are asking crowdsource workers to annotate with.
+
+    NOTE this script directly accesses Mephisto files rather than using the DataBrowser.
+    This makes it fragile and not a great example for extension. It is a good candidate
+    for refactor.
     """
 
     NUM_SUBTASKS = 7
@@ -37,6 +41,9 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
     def setup_args(cls):
         parser = super().setup_args()
         parser.add_argument(
+            '--results-folders', type=str, help='Comma-separated list of result folders'
+        )
+        parser.add_argument(
             '--onboarding-in-flight-data-file',
             type=str,
             help='Path to JSONL file containing onboarding in-flight conversations',
@@ -51,6 +58,19 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
 
     def __init__(self, opt: Dict[str, Any]):
         super().__init__(opt)
+
+        if 'results_folders' in opt:
+            self.results_folders = opt['results_folders'].split(',')
+        else:
+            self.results_folders = None
+
+        # Validate problem buckets
+        if self.use_problem_buckets and 'none_all_good' not in self.problem_buckets:
+            # The code relies on a catchall "none" category if the user selects no other
+            # annotation bucket
+            raise ValueError(
+                'There must be a "none_all_good" category in self.problem_buckets!'
+            )
         self.onboarding_in_flight_data_file = opt.get('onboarding_in_flight_data_file')
         self.gold_annotations_file = opt.get('gold_annotations_file')
         if not self.use_problem_buckets:
@@ -100,18 +120,18 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
     def compile_results(self) -> pd.DataFrame:
         # Loads data from files and gets rid of incomplete or malformed convos
         conversations = self.compile_initial_results(self.results_folders)
-        master_dataframe = self.process_data_into_dataframe(conversations)
-        self.calculate_basic_interannotator_agreement(master_dataframe)
+        main_dataframe = self.process_data_into_dataframe(conversations)
+        self.calculate_basic_interannotator_agreement(main_dataframe)
         if self.gold_annotations_file is not None:
             with open(self.gold_annotations_file, 'r') as gold_f:
                 gold_annotations = json.loads(gold_f.read())
                 self.calculate_agreement_with_gold_annotations(
-                    gold_annotations, master_dataframe
+                    gold_annotations, main_dataframe
                 )
         if self.CALCULATE_STATS_INTERANNOTATOR_AGREEMENT:
-            self.calculate_stats_interannotator_agreement(master_dataframe)
+            self.calculate_stats_interannotator_agreement(main_dataframe)
 
-        return master_dataframe
+        return main_dataframe
 
     def _validate_hit(self, hit_data) -> Tuple[bool, Optional[str]]:
         """
@@ -216,9 +236,21 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
                 continue
 
             # HIT-level metric of HIT completion time has to be done here for now
-            task_completion_time_seconds = (
-                data['times']['task_end'] - data['times']['task_start']
-            )
+            try:
+                task_completion_time_seconds = (
+                    data['times']['task_end'] - data['times']['task_start']
+                )
+            except KeyError:
+                # We've been relying on non-mephisto API, and in 1.0.2 'times' was deprecated
+                # so this uses the new location
+                metadata_path = os.path.join(os.path.dirname(dp), 'agent_meta.json')
+                with open(metadata_path, 'rb') as f:
+                    metadata = json.load(f)
+
+                # HIT-level metric of HIT completion time has to be done here for now
+                task_completion_time_seconds = (
+                    metadata['task_end'] - metadata['task_start']
+                )
             print(task_completion_time_seconds)
 
             subtasks = data['outputs']['final_data']
@@ -293,7 +325,7 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
                     row[k] = utt[k] if utt['agent_idx'] == 1 else ''
                 rows.append(row)
         df = pd.DataFrame(rows)
-        print(f'Returning master dataframe with {len(df)} annotations.')
+        print(f'Returning dataframe with {len(df)} annotations.')
         return df
 
     def _add_additional_columns(self, row: Dict[str, Any], utt: dict) -> Dict[str, Any]:
@@ -506,10 +538,10 @@ class TurnAnnotationsStaticResultsCompiler(AbstractTurnAnnotationResultsCompiler
                 except Exception:
                     n_ij = 0.0
                 p_j[j] += n_ij
-                P_bar_sum_term += n_ij ** 2
+                P_bar_sum_term += n_ij**2
 
         p_j = [tmp / (N * number_of_raters) for tmp in p_j]
-        P_e_bar = sum([tmp ** 2 for tmp in p_j])
+        P_e_bar = sum([tmp**2 for tmp in p_j])
 
         P_bar = (P_bar_sum_term - N * number_of_raters) / (
             N * number_of_raters * (number_of_raters - 1)

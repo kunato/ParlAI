@@ -21,6 +21,7 @@ import hashlib
 import tqdm
 import gzip
 import math
+import contextlib
 import parlai.utils.logging as logging
 from parlai.utils.io import PathManager
 
@@ -28,6 +29,17 @@ try:
     from torch.multiprocessing import Pool
 except ImportError:
     from multiprocessing import Pool
+
+
+try:
+    # internal infra requires special attention to use http sessions
+    from parlai_fb import get_http_session
+except (ImportError, AttributeError):
+
+    @contextlib.contextmanager
+    def get_http_session():
+        with requests.Session() as session:
+            yield session
 
 
 class DownloadableFile:
@@ -74,8 +86,9 @@ class DownloadableFile:
                 # remove_dir(dpath)
                 raise AssertionError(
                     f"Checksum for {self.file_name} from \n{self.url}\n"
-                    f"does not match the expected checksum:\n{sha256_hash.hexdigest()} != {self.hashcode}"
-                    "\n\nPlease try again."
+                    f"does not match the expected checksum:\n"
+                    f"{sha256_hash.hexdigest()} (received) != {self.hashcode} (expected)\n"
+                    f"\nPlease try again. You may need to manually delete {self.file_name}."
                 )
             else:
                 logging.debug("Checksum Successful")
@@ -95,17 +108,20 @@ class DownloadableFile:
         """
         Performs a HEAD request to check if the URL / Google Drive ID is live.
         """
-        session = requests.Session()
-        if self.from_google:
-            URL = 'https://docs.google.com/uc?export=download'
-            response = session.head(URL, params={'id': self.url}, stream=True)
-        else:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36'
-            }
-            response = session.head(self.url, allow_redirects=True, headers=headers)
-        status = response.status_code
-        session.close()
+        with get_http_session() as session:
+            if self.from_google:
+                URL = 'https://docs.google.com/uc?export=download'
+                response = session.head(URL, params={'id': self.url}, stream=True)
+            else:
+                headers = {
+                    'User-Agent': (
+                        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) '
+                        'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        'Chrome/77.0.3865.90 Safari/537.36'
+                    )
+                }
+                response = session.head(self.url, allow_redirects=True, headers=headers)
+            status = response.status_code
 
         assert status == 200
 
@@ -159,14 +175,14 @@ def download(url, path, fname, redownload=False, num_retries=5):
     download = not PathManager.exists(outfile) or redownload
     logging.info(f"Downloading {url} to {outfile}")
     retry = num_retries
-    exp_backoff = [2 ** r for r in reversed(range(retry))]
+    exp_backoff = [2**r for r in reversed(range(retry))]
 
     pbar = tqdm.tqdm(unit='B', unit_scale=True, desc='Downloading {}'.format(fname))
 
     while download and retry > 0:
         response = None
 
-        with requests.Session() as session:
+        with get_http_session() as session:
             try:
                 response = session.get(url, stream=True, timeout=5)
 
@@ -364,8 +380,13 @@ def _unzip(path, fname, delete=True):
                 PathManager.mkdirs(outpath)
                 continue
             logging.debug(f"Extracting to {outpath}")
-            with zf.open(member, 'r') as inf, PathManager.open(outpath, 'wb') as outf:
-                shutil.copyfileobj(inf, outf)
+            try:
+                with zf.open(member, 'r') as inf, PathManager.open(
+                    outpath, 'wb'
+                ) as outf:
+                    shutil.copyfileobj(inf, outf)
+            except FileNotFoundError:
+                logging.error(f"Failed to open ${member} and extract to ${outpath}")
     if delete:
         try:
             PathManager.rm(fullpath)
@@ -389,9 +410,9 @@ def download_from_google_drive(gd_id, destination):
     """
     URL = 'https://docs.google.com/uc?export=download'
 
-    with requests.Session() as session:
+    with get_http_session() as session:
         response = session.get(URL, params={'id': gd_id}, stream=True)
-        token = _get_confirm_token(response)
+        token = _get_confirm_token(response) or 't'
 
         if token:
             response.close()

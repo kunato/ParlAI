@@ -27,10 +27,19 @@ from parlai.core.opt import Opt
 from parlai.core.params import ParlaiParser
 from parlai.core.torch_agent import Batch, TorchAgent
 from parlai.core.torch_generator_agent import TorchGeneratorAgent, TorchGeneratorModel
+from parlai.utils.fsdp import is_fsdp
+
+
+def check_hf_version(v: Tuple[int, int]) -> bool:
+    """
+    Check that HF version is greater than 4.3.
+    """
+    main, sub = v
+    return main > 4 or (main == 4 and sub >= 3)
 
 
 def build_t5(opt: Opt) -> T5ForConditionalGeneration:
-    if not HF_VERSION >= 4.3:
+    if not check_hf_version(HF_VERSION):
         raise RuntimeError('Must use transformers package >= 4.3 to use t5')
     return T5ForConditionalGeneration.from_pretrained(
         opt['t5_model_arch'], dropout_rate=opt['t5_dropout']
@@ -46,10 +55,14 @@ def set_device(func):
     """
 
     def wrap(*args, **kwargs):
-        if torch.cuda.is_available():
+        self = args[0]
+        # self.paralleled implies whether the model has been paralleled.
+        # it is set to the opposite of `opt['t5_model_parallel]`
+        parallel = hasattr(self, 'paralleled') and not self.paralleled
+        if torch.cuda.is_available() and parallel:
             torch.cuda.set_device('cuda:0')
         ret = func(*args, **kwargs)
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and parallel:
             torch.cuda.set_device('cuda:0')
         return ret
 
@@ -186,8 +199,11 @@ class T5Agent(TorchGeneratorAgent):
         if overrides:
             generation_params.update(overrides)
 
-        outputs = self.model.t5.generate(**generation_params)
-        outputs = [(outputs[i], 0) for i in range(outputs.size(0))]
+        model = self.model
+        if hasattr(self.model, 'module') and not is_fsdp(self.model):
+            model = self.model.module
+        outputs = model.t5.generate(**generation_params)
+        outputs = [(outputs[i], 0, None) for i in range(outputs.size(0))]
         return outputs, []
 
 
@@ -285,6 +301,7 @@ class ParlaiT5Model(TorchGeneratorModel):
         self.t5 = build_t5(opt)
         self.encoder = ParlaiT5Encoder(opt, self.t5.get_encoder(), self.pad_idx)
         self.decoder = ParlaiT5Decoder(opt, self.t5.get_decoder(), self.pad_idx)
+        self.paralleled = not opt['t5_model_parallel']
 
     @set_device
     def _get_initial_forced_decoder_input(self, bsz: int, inputs: torch.LongTensor):
@@ -332,7 +349,7 @@ class ParlaiT5Model(TorchGeneratorModel):
         # Taken directly from HuggingFace
         # Rescale output before projecting on vocab
         # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-        tensor = tensor * (self.t5.model_dim ** -0.5)
+        tensor = tensor * (self.t5.model_dim**-0.5)
         lm_logits = self.t5.lm_head(tensor)
         return lm_logits
 

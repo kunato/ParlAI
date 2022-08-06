@@ -2,32 +2,33 @@
 
 Here we list projects undertaken in the ParlAI framework that are shared publicly, either in the form of papers, public tasks (with leaderboards) and/or shared model code.
 
-This directory also contains subfolders for some of the projects which are housed in the ParlAI repo, others are maintained via external websites. Please also refer to ParlAI's [agents](https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents), [tasks](https://github.com/facebookresearch/ParlAI/tree/master/parlai/tasks) and [model zoo](https://github.com/facebookresearch/ParlAI/tree/master/parlai/zoo) for what else is in ParlAI.
+This directory also contains subfolders for some of the projects which are housed in the ParlAI repo, others are maintained via external websites. Please also refer to ParlAI's [agents](https://github.com/facebookresearch/ParlAI/tree/main/parlai/agents), [tasks](https://github.com/facebookresearch/ParlAI/tree/main/parlai/tasks) and [model zoo](https://github.com/facebookresearch/ParlAI/tree/main/parlai/zoo) for what else is in ParlAI.
 
-## Generative Models
+## Generative Models & Architectures 
 
-- **More Parameters or More Compute?** [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/params_vs_compute) _Answer: Both! Two new methods that explore this question: Hash Layers for more parameters, and Staircase Attention for more power per parameter._
+- **Director** [[project]](https://parl.ai/projects/director/) _New architecture/method for training language models with positive and negative examples._
 
-- **Style-Controlled Generation** [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/style_gen) [[paper]](https://arxiv.org/abs/2009.10855) _Tasks and models for training and evaluating generative models conditioned on a style token._
+- **Maintaining Identity** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/light_whoami/) _State-of-the-art dialogue models cannot maintain identity -- we study measurements & methods for this open problem._
+
+- **More Parameters or More Compute?** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/params_vs_compute) _Answer: Both! Two new methods that explore this question: Hash Layers for more parameters, and Staircase Attention for more power per parameter._
+
+- **Style-Controlled Generation** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/style_gen) [[paper]](https://arxiv.org/abs/2009.10855) _Tasks and models for training and evaluating generative models conditioned on a style token._
 
 - **Unlikelihood Training for Consistent Dialogue** [[project]](https://parl.ai/projects/dialogue_unlikelihood/).
   _Methods to reduce copies & repeats, correct vocab usage, and avoiding contradiction via unlikelihood training._
 
-- **What makes a good conversation? How controllable attributes affect human judgments** [[website]](https://github.com/facebookresearch/ParlAI/tree/master/projects/controllable_dialogue) [[paper]](https://arxiv.org/abs/1902.08654).
+- **What makes a good conversation? How controllable attributes affect human judgments** [[website]](https://github.com/facebookresearch/ParlAI/tree/main/projects/controllable_dialogue) [[paper]](https://arxiv.org/abs/1902.08654).
   _Optimizing for multi-turn engaging conversations -- by controlling question-asking, specificity, response-relatedness and repetition._
 
 - **Retrieve and Refine** [[paper]](https://arxiv.org/abs/1808.04776).
   _Models for improved chitchat ability by combining retrieval with generative refinement._
 
-- **Importance of Search Strategy** [[paper]](https://arxiv.org/abs/1811.00907).
-  _Analysis of the performance of search in generative models for chitchat tasks._
-
-
-## Retrieval Models
 - **Poly-Encoders** [[project]](https://parl.ai/projects/polyencoder/) [[paper]](https://arxiv.org/abs/1905.01969).
   _State-of-the-art Transformer architectures + pretraining for dialogue retrieval._
 
-
+- **Importance of Search Strategy** [[paper]](https://arxiv.org/abs/1811.00907).
+  _Analysis of the performance of search in generative models for chitchat tasks._
+  
 ## Interactive Learning
 
 - **Self-Feeding Chatbot** [[paper]](https://arxiv.org/abs/1901.05415)
@@ -66,12 +67,17 @@ _Task & models for chitchat displaying empathy._
 - **ConvAI2 Competition** [[external website]](http://convai.io/).
 _Competition on dialogue chitchat based on the PersonaChat task._
 
-- **Persona-Chat** [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/personachat).
+- **Persona-Chat** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/personachat).
 _Task & models for chitchat with a given persona._
 
 
-## Well-Behaved
+## <a id="well-behaved">Well-Behaved</a> / Safety
 
+- **SaFeRDialogues: Taking Feedback Gracefully after Conversational Safety Failures** [[project]](https://parl.ai/projects/saferdialogues/) [[paper]](https://arxiv.org/abs/2110.07518).
+  _Task and method for teaching bots to react gracefully to feedbacks when safety failures happen_
+
+- **Safety for E2E Conversational AI workshops** _We have helped organize workshops in [2020](https://emdinan1.medium.com/a-recap-of-the-first-workshop-on-safety-for-conversational-ai-98201d257530) and [2021](https://sites.google.com/view/safety4convai/home) on Safety in Conversational AI._
+  
 - **Anticipating Safety Issues in E2E Conversational AI** [[project]](https://parl.ai/projects/safety_bench/) [[paper]](https://arxiv.org/abs/2107.03451).
   _Benchmarks for evaluating the safety of English-language dialogue models_
 
@@ -87,8 +93,15 @@ _Task & models for chitchat with a given persona._
 - **Mitigating Genderation Bias** [[project]](https://parl.ai/projects/genderation_bias/) [[paper]](https://arxiv.org/abs/1911.03842).
   _Analysis and methods for mitigating gender bias in dialogue generation, using LIGHT as a testbed._
 
+- **Reducing conversational agents' overconfidence through linguistic calibration** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/metacognition) [[paper]](https://arxiv.org/abs/2012.14983).
+  _Analysis and methods for relating and correcting linguistice confidence and correctness in dialogue generation, using closed-book QA as a testbed._
+
 
 ## Knowledge Grounded
+
+- **SeeKeR:** [[project]](http://parl.ai/projects/seeker) _Modular open source search-augmented language model._
+
+- **Reason first, then respond:** [[paper]](https://arxiv.org/abs/2111.05204) _A modular Generation method for Knowledge-infused Dialogue._
 
 - **Internet-Augmented Dialogue Generation** [[project]](http://parl.ai/projects/sea) [[paper]](https://arxiv.org/abs/2107.07566).
   _Utilizing a search-engine for open domain chitchat task & models._
@@ -101,9 +114,9 @@ _Task & models for chitchat with a given persona._
 
 ## Visually Grounded
 
-- **Multi-Modal BlenderBot** [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/multimodal_blenderbot/) [[paper]](https://arxiv.org/abs/2010.01082). _Model for multi-modal dialogue about both images and chitchat._
+- **Multi-Modal BlenderBot** [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/multimodal_blenderbot/) [[paper]](https://arxiv.org/abs/2010.01082). _Model for multi-modal dialogue about both images and chitchat._
 
-- **Image Chat** [[paper]](https://klshuster.github.io/image_chat/) [[task]](https://github.com/facebookresearch/ParlAI/tree/master/parlai/tasks/image_chat).
+- **Image Chat** [[paper]](https://klshuster.github.io/image_chat/) [[task]](https://github.com/facebookresearch/ParlAI/tree/main/parlai/tasks/image_chat).
   _Task for personality-based engaging dialogue on images._
 
 - **Personality-Captions** [[project]](http://parl.ai/projects/personality_captions/) [[paper]](https://arxiv.org/abs/1810.10665).
@@ -115,7 +128,7 @@ _Task & models for chitchat with a given persona._
 - **LIGHT** [[project]](http://parl.ai/projects/light/)
 _A large-scale text adventure game research platform for agents that speak and act._
 
-- **Mastering the Dungeon** (Archived) [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/mastering_the_dungeon).
+- **Mastering the Dungeon** (Archived) [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/mastering_the_dungeon).
 _Task & models for training grounded agents in a text adventure game via MTurk._
 
 - **Talk The Walk** (Archived) [[paper]](https://arxiv.org/abs/1807.03367).
@@ -129,11 +142,14 @@ _QA task with multi-hop reasoning. Task built with ParlAI Mturk._
 - **CoQA** [[external website]](https://stanfordnlp.github.io/coqa/).
 _QA task with a series of interconnected questions. Task built with ParlAI Mturk._
 
-- **DrQA** [[parlai agent]](https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents/drqa) [[project]](https://github.com/facebookresearch/ParlAI/tree/master/projects/drqa) [[external website]](https://github.com/facebookresearch/DrQA) [[paper]](https://arxiv.org/abs/1704.00051).
+- **DrQA** [[parlai agent]](https://github.com/facebookresearch/ParlAI/tree/main/parlai/agents/drqa) [[project]](https://github.com/facebookresearch/ParlAI/tree/main/projects/drqa) [[external website]](https://github.com/facebookresearch/DrQA) [[paper]](https://arxiv.org/abs/1704.00051).
 _QA model for answering questions by retrieving and reading knowledge._
 
 ## Evaluation
 
-- **ACUTE-Eval** [[parlai task]](https://github.com/facebookresearch/ParlAI/tree/master/parlai/crowdsourcing/tasks/acute_eval) [[paper]](https://arxiv.org/abs/1909.03087).
-_ACUTE Eval is a sensitive human evaluation method for dialogue which evaluates whole conversations in a pair-wise fashion, and is our recommended method._
+- **Human Evaluation Methods Comparison** [[project]](https://parl.ai/projects/humaneval) [[paper]](https://arxiv.org/abs/2201.04723).
+_Compares how well different human crowdworker evaluation techniques can detect relative performance differences among dialogue models._
+
+- **ACUTE-Eval** [[parlai task]](https://github.com/facebookresearch/ParlAI/tree/main/parlai/crowdsourcing/tasks/acute_eval) [[paper]](https://arxiv.org/abs/1909.03087).
+_ACUTE Eval is a sensitive human evaluation method for dialogue which evaluates whole conversations in a pair-wise fashion, and is our recommended method in many cases._
 

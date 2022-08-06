@@ -98,6 +98,18 @@ task_list = [
         "links": {"arXiv": "https://arxiv.org/abs/2010.07079"},
     },
     {
+        "id": "SafetyMix",
+        "display_name": "Safety Mix",
+        "task": "safety_mix",
+        "tags": [],
+        "description": (
+            "Datasets described in the paper: Learning from data in the mixed adversarial non-adversarial case:"
+            "Finding the helpers and ignoring the trolls. "
+            "Datasets based on Bot Adversarial Dialogue and consist of a mixture of different troll users."
+            "Artificial noise is introduced to the dataset given the troll user type."
+        ),
+    },
+    {
         "id": "CBT",
         "display_name": "Children's Book Test (CBT)",
         "task": "cbt",
@@ -287,6 +299,17 @@ task_list = [
             "values to each item."
         ),
         "links": {"arXiv": "https://arxiv.org/abs/1706.05125"},
+    },
+    {
+        "id": "Friends",
+        "display_name": "Friends",
+        "task": "friends",
+        "tags": ["MultiPartyConvo"],
+        "description": (
+            "Multi-party conversation dataset modified from the 10 seasons "
+            "of the popular American sitcom that ran in the 90s, Friends."
+        ),
+        "links": {"website": "https://convokit.cornell.edu/documentation/friends.html"},
     },
     {
         "id": "Glue",
@@ -877,6 +900,18 @@ task_list = [
         "links": {"website": "https://ai.google/tools/datasets/taskmaster-1"},
     },
     {
+        "id": "MSR-E2E",
+        "display_name": "MSR End-to-End",
+        "task": "msr_e2e",
+        "tags": ["ChitChat"],
+        "description": (
+            "MSR-E2E is a dataset of human-human conversations in which one "
+            "human plays the role of an Agent and the other one plays the role"
+            "of a User. Data is collected from Amazon Mechanical Turk. "
+        ),
+        "links": {"website": "https://github.com/xiul-msr/e2e_dialog_challenge"},
+    },
+    {
         "id": "Twitter",
         "display_name": "Twitter",
         "task": "twitter",
@@ -1164,6 +1199,20 @@ task_list = [
         "links": {"arXiv": "https://arxiv.org/abs/1908.06083"},
     },
     {
+        "id": "MultiDoGo",
+        "display_name": "MultiDoGo",
+        "task": "multidogo",
+        "tags": ["TOD"],
+        "description": (
+            "MultiDoGo is a large task-oriented dataset from Amazon collected "
+            "in a Wizard of Oz fashion, using both crowd and expert annotators "
+            "with annotations at varying levels of granularity."
+        ),
+        "links": {
+            "website": "https://github.com/awslabs/multi-domain-goal-oriented-dialogues-dataset"
+        },
+    },
+    {
         "id": "MultiWOZv2.0",
         "display_name": "MultiWOZ 2.0",
         "task": "multiwoz_v20",
@@ -1184,6 +1233,19 @@ task_list = [
             "over multiple domains and topics."
         ),
         "links": {"website": "http://dialogue.mi.eng.cam.ac.uk/index.php/corpus/"},
+    },
+    {
+        "id": "MultiWOZv2.2",
+        "display_name": "MultiWOZ 2.2",
+        "task": "multiwoz_v22",
+        "tags": ["Goal"],
+        "description": (
+            "A fully labeled collection of human-written conversations spanning"
+            "over multiple domains and topics. Schemas are included."
+        ),
+        "links": {
+            "website": "https://github.com/budzianowski/multiwoz/tree/master/data/MultiWOZ_2.2"
+        },
     },
     {
         "id": "SelfChat",
@@ -1355,6 +1417,17 @@ task_list = [
         ),
     },
     {
+        "id": "GoogleSGDSimulationSplits",
+        "display_name": "GoogleSGD Simulation Splits",
+        "task": "google_sgd_simulation_splits",
+        "tags": ["Goal"],
+        "description": (
+            "Custom processing of the Google SGD dataset into In-Domain and "
+            "Out-of-Domain splits for the use of zero and few-shotting with "
+            "other task-oriented data."
+        ),
+    },
+    {
         "id": "TaskMaster2",
         "display_name": "TaskMaster2",
         "task": "taskmaster2",
@@ -1362,6 +1435,15 @@ task_list = [
         "description": (
             "The second version of TaskMaster, containing Wizard-of-Oz dialogues "
             "for task oriented dialogue in 7 domains."
+        ),
+    },
+    {
+        "id": "TaskMaster3",
+        "display_name": "TicketTalk (Taskmaster3)",
+        "task": "taskmaster3",
+        "tags": ["Goal"],
+        "description": (
+            "Taskmaster3 is a dataset of movie ticket dialogues collected in a self-chat manner. To induce conversational variety, crowd workers were asked to generate conversations given dozens of different instructions of different level of specificity, some purposefully including conversational  errors."
         ),
     },
     {
@@ -1440,5 +1522,83 @@ task_list = [
             "A multi-session human-human chit-chat dataset consist of session 2-5 follow up from PersonaChat "
             "It contains 5k full converesations from session 2 to session 5 (session 1 being PersonaChat) "
         ),
+    },
+    {
+        "id": "jericho_world",
+        "display_name": "JerichoWorld",
+        "task": "jericho_world",
+        "tags": [],
+        "description": (
+            "Jericho World dataset: common sense in a text-based game. "
+            "The goal is generating the knowledge graph of the game state "
+            "or the set of valid actions from the text descriptions of the world."
+        ),
+    },
+    {
+        "id": "CaSiNo",
+        "display_name": "CaSiNo (CampSite Negotiation Dialogues)",
+        "task": "casino",
+        "tags": ["Negotiation"],
+        "description": (
+            "A dataset of 1030 negotiation dialogues. Two participants take the role of campsite neighbors and negotiate for Food, Water, and Firewood packages, based on their individual preferences and requirements."
+        ),
+        "links": {
+            "paper": "https://aclanthology.org/2021.naacl-main.254.pdf",
+            "website": "https://github.com/kushalchawla/CaSiNo",
+        },
+    },
+    {
+        "id": "SaFeRDialogues",
+        "display_name": "SaFeRDialogues",
+        "task": "saferdialogues",
+        "tags": [],
+        "description": (
+            "A dataset of 8k dialogues demonstrating safety failures, feedback "
+            "signaling them, and a response acknowledging the feedback. "
+            "Dataset has been released under the CC BY-NC license."
+        ),
+        "links": {"arXiv": "https://arxiv.org/abs/2110.07518"},
+    },
+    {
+        "id": "XPersona",
+        "display_name": "XPersona",
+        "task": "xpersona",
+        "tags": ["ChitChat"],
+        "description": (
+            "XPersona is an extension of ConvAI2 with six more languages: Chinese, French, Indonesian, Italian, Korean, and Japanese."
+        ),
+        "links": {
+            "arXiv": "https://arxiv.org/pdf/2003.07568.pdf",
+            "website": "https://github.com/HLTCHKUST/Xpersona",
+        },
+    },
+    {
+        "id": "LCCC",
+        "display_name": "LCCC",
+        "task": "lccc",
+        "tags": ["ChitChat"],
+        "description": ("Large-scale cleaned Chinese conversation dataset."),
+        "links": {
+            "arXiv": "https://arxiv.org/pdf/2008.03946",
+            "website": "https://github.com/thu-coai/CDial-GPT",
+        },
+    },
+    {
+        "id": "SPOLIN",
+        "display_name": "SPOLIN",
+        "task": "spolin",
+        "tags": ["all", "engaging", "improv", "open-ended", "common ground"],
+        "description": "Conversation pairs from the SPOLIN dataset. The pairs abide by the Yes-and principle of improvisational theatre (improv).",
+        "links": {
+            "arXiv": "https://arxiv.org/abs/2004.09544",
+            "website": "https://justin-cho.com/spolin",
+        },
+    },
+    {
+        "id": "Feedback for Interactive Talk & Search",
+        "display_name": "FITS",
+        "task": "fits",
+        "tags": ["all", "engaging", "improve", "open-ended"],
+        "description": "A human-model dialogue dataset consist of 14k dialogues where human speakers give feedbacks on bot responses. ",
     },
 ]

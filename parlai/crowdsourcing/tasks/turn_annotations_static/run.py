@@ -15,19 +15,18 @@ from omegaconf import DictConfig
 from parlai.crowdsourcing.tasks.turn_annotations_static.turn_annotations_blueprint import (
     STATIC_BLUEPRINT_TYPE,
 )
-from parlai.crowdsourcing.tasks.turn_annotations_static.util import run_static_task
-from parlai.crowdsourcing.utils.mturk import MTurkRunScriptConfig
+from parlai.crowdsourcing.utils.mturk import MTurkRunScriptConfig, run_static_task
 
+"""
+Read parlai/crowdsourcing/README.md to learn how to launch
+crowdsourcing tasks with this script.
+"""
+
+_ = STATIC_BLUEPRINT_TYPE
 
 TASK_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
-
-defaults = [
-    {'mephisto/blueprint': STATIC_BLUEPRINT_TYPE},
-    {"mephisto/architect": "local"},
-    {"mephisto/provider": "mock"},
-    {"conf": "example"},
-]
+defaults = ["_self_", {"conf": 'example'}]
 
 
 @dataclass
@@ -45,9 +44,11 @@ class ScriptConfig(MTurkRunScriptConfig):
 register_script_config(name='scriptconfig', module=ScriptConfig)
 
 
-@hydra.main(config_name="scriptconfig")
+@hydra.main(config_path="hydra_configs", config_name="scriptconfig")
 def main(cfg: DictConfig) -> None:
-    run_static_task(cfg=cfg, task_directory=TASK_DIRECTORY)
+    run_static_task(
+        cfg=cfg, task_directory=TASK_DIRECTORY, task_id='turn_annotations_static'
+    )
 
 
 if __name__ == "__main__":

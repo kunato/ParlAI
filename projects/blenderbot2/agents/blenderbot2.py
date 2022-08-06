@@ -13,13 +13,16 @@ its memory or access the internet.
 The Memory Decoder examines the context and generates memories to write to
 the long-term memory module.
 """
+from abc import abstractmethod
+import re
+import copy
 import torch
 import torch.nn
 import torch.nn.functional as F
 from typing import Union, Dict, List, Tuple, Optional, Any
 
-from parlai.agents.fid.fid import FidAgent
-from parlai.agents.rag.args import DPR_ZOO_MODEL, QUERY_MODEL_TYPES
+from parlai.agents.fid.fid import FidAgent, WizIntGoldDocRetrieverFiDAgent
+from parlai.agents.rag.args import DPR_ZOO_MODEL, QUERY_MODEL_TYPES, RetrieverType
 from parlai.agents.rag.rag import RagAgent
 from parlai.agents.rag.model_types import (
     RagTurn,
@@ -31,13 +34,16 @@ from parlai.core.message import Message
 from parlai.core.metrics import AverageMetric
 from parlai.core.opt import Opt
 from parlai.core.params import ParlaiParser
-from parlai.core.torch_agent import Batch
+from parlai.core.torch_agent import Batch, History
 from parlai.tasks.wizard_of_internet.constants import (
     SELECTED_DOCS,
     SELECTED_DOCS_TITLES,
     SELECTED_SENTENCES,
+    NO_SELECTED_DOCS_TOKEN,
+    SKIP_SEARCH,
 )
 from parlai.utils.torch import padded_3d
+from parlai.utils.typing import TShared
 
 from .modules import (
     BlenderBot2RagModel,
@@ -51,6 +57,54 @@ from parlai.agents.fid.fid import SearchQuerySearchEngineFiDAgent
 
 ZOO_QUERY_GENERATOR = 'zoo:blenderbot2/query_generator/model'
 ZOO_MEMORY_DECODER = 'zoo:blenderbot2/memory_decoder/model'
+
+
+class HistoryCleanReply(History):
+    def __init__(
+        self,
+        opt,
+        field='text',
+        maxlen=None,
+        size=-1,
+        p1_token='__p1__',
+        p2_token='__p2__',
+        dict_agent=None,
+    ):
+        super().__init__(
+            opt,
+            field=field,
+            maxlen=maxlen,
+            size=size,
+            p1_token=p1_token,
+            p2_token=p2_token,
+            dict_agent=dict_agent,
+        )
+        self.add_cleaned_reply_to_history = opt.get(
+            'add_cleaned_reply_to_history', False
+        )
+
+    @abstractmethod
+    def _clean_text(self, txt):
+        """
+        Clean text to be override with custom logic.
+        """
+
+    def add_reply(self, text):
+        clean_text = text
+        if self.add_cleaned_reply_to_history:
+            clean_text = self._clean_text(text)
+        super().add_reply(clean_text)
+
+
+class HistoryCleanUnsafeToken(HistoryCleanReply):
+    """
+    Override the history _clean_text to filter out special tokens like
+    _potentially_unsafe.
+    """
+
+    def _clean_text(self, txt):
+        cleaned_txt = re.sub(r'_[\S]*unsafe_*', '', txt, flags=re.IGNORECASE)
+        return cleaned_txt.strip()
 
 
 class BlenderBot2ModelTypeMixin(RagModelInterface):
@@ -98,6 +152,7 @@ class BlenderBot2RagSequence(BlenderBot2ModelTypeMixin, RagSequence):
             batch.num_gold_docs,
             batch.memory_decoder_vec,
             batch.num_memory_decoder_vecs,
+            batch.skip_search,
         )
         doc_log_probs = F.log_softmax(doc_scores, dim=1)
         batch.src_text_vec = batch.text_vec
@@ -222,6 +277,12 @@ class BlenderBot2RagAgent(RagAgent):
             help='Field for selected docs titles.',
         )
         bb2_group.add_argument(
+            '--skip-search-key',
+            type=str,
+            default=SKIP_SEARCH,
+            help='Field for whether to skip search or not.',
+        )
+        bb2_group.add_argument(
             '--insert-gold-docs',
             type='bool',
             default=False,
@@ -328,6 +389,12 @@ class BlenderBot2RagAgent(RagAgent):
             hidden=True,
             help='model file for memory writer',
         )
+        bb2_group.add_argument(
+            '--add-cleaned-reply-to-history',
+            type=bool,
+            default=False,
+            help='whether to add the cleaned bb2 generated text without any special tokens to its history',
+        )
         memory_decoder = parser.add_argument_group('BlenderBot2 Memory Decoder Args')
         memory_decoder.add_argument(
             '--memory-decoder-key',
@@ -379,6 +446,10 @@ class BlenderBot2RagAgent(RagAgent):
             help='specify to combine memories on one line, rather than several.',
         )
         return parser
+
+    @classmethod
+    def history_class(cls):
+        return HistoryCleanUnsafeToken
 
     @property
     def rag_model_type(self) -> str:
@@ -507,7 +578,7 @@ class BlenderBot2RagAgent(RagAgent):
             )
         if self.add_person_tokens:
             query_str = self._remove_person_tokens(query_str)
-        observation['query_vec'] = self.model.tokenize_query(query_str)
+        observation['query_vec'] = self.model_api.tokenize_query(query_str)
         return observation
 
     def _set_memory_vec(self, observation: Message) -> Message:
@@ -541,7 +612,7 @@ class BlenderBot2RagAgent(RagAgent):
                     m for m in memories if self.opt['memory_extractor_phrase'] in m
                 ]
             if memories:
-                mem_vecs = [self.model.tokenize_memory(mem) for mem in memories]
+                mem_vecs = [self.model_api.tokenize_memory(mem) for mem in memories]
 
         observation['memory_vec'] = mem_vecs
         return observation
@@ -565,7 +636,7 @@ class BlenderBot2RagAgent(RagAgent):
                 KnowledgeAccessMethod.CLASSIFY,
                 KnowledgeAccessMethod.SEARCH_ONLY,
             ]
-            and self.model.has_query_generator()
+            and self.model_api.has_query_generator()
         ):
             query_generator_input = observation[self.opt['query_generator_key']]
             if self.opt['query_generator_ignore_phrase']:
@@ -578,7 +649,7 @@ class BlenderBot2RagAgent(RagAgent):
                 query_generator_input = self._remove_person_tokens(
                     query_generator_input
                 )
-            query_generator_vec = self.model.tokenize_query_generator_input(
+            query_generator_vec = self.model_api.tokenize_query_generator_input(
                 query_generator_input
             )
 
@@ -599,7 +670,8 @@ class BlenderBot2RagAgent(RagAgent):
         :return observation:
             return observation with gold doc vec.
         """
-        if not observation[self.opt['gold_document_key']]:
+        gold_docs = observation[self.opt['gold_document_key']]
+        if not gold_docs or gold_docs == [NO_SELECTED_DOCS_TOKEN]:
             return observation
         doc_vecs = None
         doc_title_vecs = None
@@ -614,7 +686,7 @@ class BlenderBot2RagAgent(RagAgent):
             sentences = observation[self.opt['gold_sentence_key']]
             document_titles = observation[self.opt['gold_document_titles_key']]
             if isinstance(selected_documents, str):
-                documents = [selected_documents]
+                selected_documents = [selected_documents]
             assert isinstance(selected_documents, list)
 
             documents = []
@@ -661,7 +733,7 @@ class BlenderBot2RagAgent(RagAgent):
                 KnowledgeAccessMethod.CLASSIFY,
                 KnowledgeAccessMethod.MEMORY_ONLY,
             ]
-            and self.model.has_memory_decoder()
+            and self.model_api.has_memory_decoder()
         ):
             memory_decoder_input = observation[self.opt['memory_decoder_key']]
             if self.opt['memory_decoder_ignore_phrase']:
@@ -678,7 +750,7 @@ class BlenderBot2RagAgent(RagAgent):
                 for t in tt.split('\n')
             ]
             memory_decoder_vec = [
-                self.model.tokenize_memory_decoder_input(i) for i in conv_lines
+                self.model_api.tokenize_memory_decoder_input(i) for i in conv_lines
             ]
 
         observation['memory_decoder_vec'] = memory_decoder_vec
@@ -698,6 +770,7 @@ class BlenderBot2RagAgent(RagAgent):
         batch.num_gold_docs = None
         batch.memory_decoder_vec = None
         batch.num_memory_decoder_vecs = None
+        batch.skip_search = None
         if any(ex.get('memory_vec') is not None for ex in valid_exs):
             batch = self._set_batch_memory_vec(valid_exs, batch)
         if any(ex.get('query_generator_vec') is not None for ex in valid_exs):
@@ -706,6 +779,8 @@ class BlenderBot2RagAgent(RagAgent):
             batch = self._set_batch_gold_doc_vec(valid_exs, batch)
         if any(ex.get('memory_decoder_vec') is not None for ex in valid_exs):
             batch = self._set_batch_memory_decoder_vec(valid_exs, batch)
+        if any(ex.get(self.opt.get('skip_search_key')) is not None for ex in valid_exs):
+            batch = self._set_batch_skip_search(valid_exs, batch)
         return batch
 
     def _set_batch_memory_vec(self, valid_exs: List[Message], batch: Batch) -> Batch:
@@ -778,14 +853,21 @@ class BlenderBot2RagAgent(RagAgent):
         batch.num_memory_decoder_vecs = torch.LongTensor(num_memory_dec_toks)
         return batch
 
+    def _set_batch_skip_search(self, valid_exs: List[Message], batch: Batch) -> Batch:
+        skip_search = [ex.get(self.opt['skip_search_key'], False) for ex in valid_exs]
+        batch.skip_search = torch.BoolTensor(skip_search)
+        return batch
+
     def eval_step(self, batch):
         output = super().eval_step(batch)
-        if output is None or not hasattr(self.model, 'retriever'):
+        if output is None or not hasattr(self.model_api, 'retriever'):
             return output
-        if hasattr(self.model.retriever, 'top_docs'):
-            output.top_docs = self.model.retriever.top_docs
-        if hasattr(self.model.retriever, 'search_queries'):
-            output.search_queries = self.model.retriever.search_queries
+        if hasattr(self.model_api.retriever, 'top_docs'):
+            output.top_docs = self.model_api.retriever.top_docs
+        if hasattr(self.model_api.retriever, 'search_queries'):
+            output.search_queries = self.model_api.retriever.search_queries
+        if hasattr(self.model_api.memory_decoder, 'memories_full_list'):
+            output.memories = self.model_api.memory_decoder.memories_full_list
         return output
 
     def _model_input(
@@ -803,6 +885,7 @@ class BlenderBot2RagAgent(RagAgent):
         torch.LongTensor,
         torch.LongTensor,
         torch.LongTensor,
+        torch.BoolTensor,
     ]:
         """
         Override RagAgent._model_input to include several more input vectors.
@@ -822,6 +905,7 @@ class BlenderBot2RagAgent(RagAgent):
             batch.num_gold_docs,
             batch.memory_decoder_vec,
             batch.num_memory_decoder_vecs,
+            batch.skip_search,
         )
 
     def compute_loss(
@@ -831,15 +915,15 @@ class BlenderBot2RagAgent(RagAgent):
         Override Rag.compute_loss to add some additional metrics.
         """
         loss, output = super().compute_loss(batch, return_output=True)
-        assert isinstance(self.model, BlenderBot2RagModel)
+        assert isinstance(self.model_api, BlenderBot2RagModel)
         if (
             KnowledgeAccessMethod(self.opt['knowledge_access_method'])
             is KnowledgeAccessMethod.CLASSIFY
-            and self.model.has_query_generator()
+            and self.model_api.has_query_generator()
         ):
             _scores, _preds, enc_state, *_ = output
             _, _, input_turns_cnt, _, _ = enc_state
-            retrieval_type = self.model.get_retrieval_type()
+            retrieval_type = self.model_api.get_retrieval_type()
             assert isinstance(retrieval_type, torch.Tensor)
             if input_turns_cnt is not None:
                 new_ret_type = torch.zeros(input_turns_cnt.size(0))
@@ -888,3 +972,16 @@ class BlenderBot2FidAgent(FidAgent, BlenderBot2RagAgent):
                 model.encoder.embeddings.weight, self.opt['embedding_type']
             )
         return model
+
+
+class BlenderBot2SearchQueryFiDAgent(BlenderBot2FidAgent):
+    def __init__(self, opt: Opt, shared: TShared = None):
+        opt = copy.deepcopy(opt)
+        opt['rag_retriever_type'] = RetrieverType.SEARCH_ENGINE.value
+        super().__init__(opt, shared=shared)
+
+
+class BlenderBot2WizIntGoldDocRetrieverFiDAgent(
+    WizIntGoldDocRetrieverFiDAgent, BlenderBot2FidAgent
+):
+    pass

@@ -16,9 +16,6 @@ from pytest_regressions.data_regression import DataRegressionFixture
 
 try:
 
-    from parlai.crowdsourcing.tasks.acute_eval.acute_eval_blueprint import (
-        BLUEPRINT_TYPE,
-    )
     from parlai.crowdsourcing.tasks.acute_eval.run import TASK_DIRECTORY
     from parlai.crowdsourcing.utils.tests import AbstractOneTurnCrowdsourcingTest
 
@@ -55,16 +52,11 @@ try:
 
             # Set up the config, database, operator, and server
             overrides = ['mephisto.blueprint.block_on_onboarding_fail=False']
-            self._set_up_config(
-                blueprint_type=BLUEPRINT_TYPE,
-                task_directory=TASK_DIRECTORY,
-                overrides=overrides,
-            )
+            self._set_up_config(task_directory=TASK_DIRECTORY, overrides=overrides)
             self._set_up_server()
 
             # Check that the agent state is as it should be
             self._test_agent_state(task_data=task_data, data_regression=data_regression)
-
 
 except ImportError:
     pass

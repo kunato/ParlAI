@@ -20,8 +20,6 @@ from parlai.utils.io import PathManager
 def export_model(opt: Opt):
     """
     Export a model to TorchScript so that inference can be run outside of ParlAI.
-
-    Currently, only CPU greedy-search inference on BART models is supported.
     """
 
     if version.parse(torch.__version__) < version.parse("1.7.0"):
@@ -34,8 +32,7 @@ def export_model(opt: Opt):
         from parlai.torchscript.modules import TorchScriptGreedySearch
 
     overrides = {
-        "no_cuda": True,  # TorchScripting is CPU only
-        "model_parallel": False,  # model_parallel is not currently supported when TorchScripting
+        "model_parallel": False  # model_parallel is not currently supported when TorchScripting,
     }
     if opt.get("script_module"):
         script_module_name, script_class_name = opt["script_module"].split(":", 1)
@@ -54,9 +51,18 @@ def export_model(opt: Opt):
     original_module = script_class(agent)
 
     # Script the module and save
-    scripted_module = torch.jit.script(script_class(agent))
+    instantiated = script_class(agent)
+    if not opt["no_cuda"]:
+        instantiated = instantiated.cuda()
+    if opt.get("enable_inference_optimizations"):
+        scripted_model = torch.jit.optimize_for_inference(
+            torch.jit.script(instantiated.eval())
+        )
+    else:
+        scripted_model = torch.jit.script(instantiated)
+
     with PathManager.open(opt["scripted_model_file"], "wb") as f:
-        torch.jit.save(scripted_module, f)
+        torch.jit.save(scripted_model, f)
 
     # Compare the original module to the scripted module against the test inputs
     if len(opt["input"]) > 0:
@@ -64,7 +70,7 @@ def export_model(opt: Opt):
         print("\nGenerating given the original unscripted module:")
         _run_conversation(module=original_module, inputs=inputs)
         print("\nGenerating given the scripted module:")
-        _run_conversation(module=scripted_module, inputs=inputs)
+        _run_conversation(module=scripted_model, inputs=inputs)
 
 
 def setup_args() -> ParlaiParser:
@@ -89,6 +95,13 @@ def setup_args() -> ParlaiParser:
         type=str,
         default="parlai.torchscript.modules:TorchScriptGreedySearch",
         help="module to TorchScript. Example: parlai.torchscript.modules:TorchScriptGreedySearch",
+    )
+    parser.add_argument(
+        "-eio",
+        "--enable-inference-optimization",
+        type=bool,
+        default=False,
+        help="Enable inference optimizations on the scripted model.",
     )
     return parser
 

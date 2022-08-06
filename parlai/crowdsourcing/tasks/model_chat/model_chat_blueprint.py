@@ -137,7 +137,12 @@ class BaseModelChatBlueprintArgs(ParlAIChatBlueprintArgs):
     )
     final_rating_question: str = field(
         default='Please rate your partner on a scale of 1-5.',
-        metadata={"help": "Text to show when asking worker to make their final rating"},
+        metadata={
+            "help": (
+                "Text to show when asking worker to make their final rating. For "
+                "multiple final ratings, separate text strings with a '|'."
+            )
+        },
     )
     max_concurrent_responses: int = field(
         default=1,
@@ -149,6 +154,10 @@ class BaseModelChatBlueprintArgs(ParlAIChatBlueprintArgs):
             "help": "Additional args to pass to initialize the context generator "
             "in order to override the parlai parser defaults."
         },
+    )
+    emoji_picker: bool = field(
+        default=False,
+        metadata={"help": "Show emoji picker."},
     )
 
 
@@ -287,9 +296,10 @@ class BaseModelChatBlueprint(ParlAIChatBlueprint, ABC):
             "annotation_buckets": annotation_buckets,
             "onboarding_data": getattr(self, 'onboard_task_data', None),
             "left_pane_text": self.left_pane_text,
-            "frame_height": '650px',
+            "frame_height": 650,
             "final_rating_question": self.args.blueprint.final_rating_question,
             "block_mobile": True,
+            "emoji_picker": self.args.blueprint.emoji_picker,
         }
 
 
@@ -307,8 +317,8 @@ class ModelChatBlueprintArgs(BaseModelChatBlueprintArgs):
     conversation_start_mode: str = field(
         default='hi',
         metadata={
-            "help": 'Whether to show "Hi!" or two previous utterances (as in BlendedSkillTalk) at the beginning of the conversation',
-            "choices": ['hi', 'bst'],
+            "help": 'Set to "hi" to show "Hi!" at the beginning of the conversation, or '
+            'set to a task name to specify a custom context'
         },
     )
     include_persona: bool = field(
@@ -384,7 +394,9 @@ class ModelChatBlueprint(BaseModelChatBlueprint):
         args.blueprint.num_conversations = sum(conversations_needed.values())
         super().assert_task_args(args=args, shared_state=shared_state)
 
-        if args.blueprint.get("annotations_config_path", "") != "":
+        if args.blueprint.get(
+            "annotations_config_path", ""
+        ) != "" and args.blueprint.get("onboarding_qualification", None):
             # We are going to do annotations, so check for the presence of an onboarding
             # data file that will be used to onboard users into knowing how to do the
             # annotations properly
@@ -407,7 +419,9 @@ class ModelChatBlueprint(BaseModelChatBlueprint):
 
         super().__init__(task_run=task_run, args=args, shared_state=shared_state)
 
-        if args.blueprint.get("annotations_config_path", "") != "":
+        if args.blueprint.get(
+            "annotations_config_path", ""
+        ) != "" and args.blueprint.get("onboarding_qualification", None):
             # We are going to do annotations, so load the onboarding data file that will
             # be used to onboard users into knowing how to do the annotations properly
             onboard_task_data_path = os.path.expanduser(
@@ -421,12 +435,22 @@ class ModelChatBlueprint(BaseModelChatBlueprint):
         run_statistics = {r: 0 for (r, v) in self.conversations_needed.items()}
         shared_state.run_statistics = run_statistics
 
-        context_generator: Optional[ContextGenerator] = None
         if (
             args.blueprint.include_persona
-            or args.blueprint.conversation_start_mode == 'bst'
+            # 'hi' mode does not use a context generator and instead just displays "Hi!"
+            # at the start of the conversation
+            or args.blueprint.conversation_start_mode != 'hi'
         ):
-            context_generator = get_context_generator(args.blueprint.override_opt)
+            if args.blueprint.conversation_start_mode == 'hi':
+                # Default to using the context from BlendedSkillTalk
+                task = 'blended_skill_talk'
+            else:
+                task = args.blueprint.conversation_start_mode
+            context_generator = get_context_generator(
+                override_opt=args.blueprint.override_opt, task=task
+            )
+        else:
+            context_generator: Optional[ContextGenerator] = None
         shared_state.context_generator = context_generator
 
         # Lock for editing run statistics between threads
@@ -440,7 +464,9 @@ class ModelChatBlueprint(BaseModelChatBlueprint):
                 'statistics_condition': statistics_condition,
                 'max_onboard_time': args.blueprint.max_onboard_time,
                 'onboard_task_data': self.onboard_task_data,
-                'onboarding_qualification': args.blueprint.onboarding_qualification,
+                "onboarding_qualification": args.blueprint.get(
+                    "onboarding_qualification"
+                ),
             }
         )
         shared_state.world_opt.update(
